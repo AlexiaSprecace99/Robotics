@@ -28,7 +28,7 @@ for i  =  1 : size(time,2)
 end
 
 % errors
-figure(1);
+h(1) = subplot(2,2,1);
 hold on
 plot(time, e_pp(1,:));
 plot(time, e_pp(2,:));
@@ -49,7 +49,7 @@ drawnow
 % drawnow
 
 % robot motion
-figure(2);
+h(2) = subplot(2,2,3);
 axis equal
 axis ([-0.5 2.5 -0.5 2.5])
 grid on
@@ -70,8 +70,7 @@ for i = 1:1:size(q_pp,2)
     
    
     
-    legend('real robot')
-
+    
     drawnow
 
 end

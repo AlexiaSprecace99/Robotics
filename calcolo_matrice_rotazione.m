@@ -1,4 +1,7 @@
 syms q1 a1 q2 q3 a2 a3 dq1 dq2 dq3;
+% q = [q1; q2;q3]; dq = [dq1; dq2;dq3];
+% [~, ~, p] = direct_kinematics([q1, q2, q3]);
+% J = jacobian(p,q);
 T01 = [cos(q1) -sin(q1) 0 a1*cos(q1);sin(q1) cos(q1) 0 a1*sin(q1);0 0 1 0;0 0 0 1];
 
 T12= [-sin(q2) 0 cos(q2) 0;cos(q2) 0 sin(q2) 0;0 1 0 0;0 0 0 1];
