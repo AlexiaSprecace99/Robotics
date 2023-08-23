@@ -14,8 +14,7 @@ res = 0.1;
 [t_sim, q_sim] = adjust_time(t_out,q_out,res);
 
 % errors
-h(1) = subplot(1,2,1);
-hold on
+figure
 plot(t_out,e_out(1,:));
 plot(t_out,e_out(2,:));
 plot(t_out,e_out(3,:));
@@ -23,7 +22,7 @@ legend('$e_1$','$e_2$','Interpreter','latex');
 title('Errors');
 
 % robot motion
-h(2) = subplot(1,2,2);
+figure;
 hold on
 axis equal
 axis ([-0.5 2.5 -1.0 2.0])
