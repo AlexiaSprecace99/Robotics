@@ -325,6 +325,7 @@ int main(int argc, char **argv)
 	Eigen::VectorXd 	v(arm_cubes_n);
 	Eigen::VectorXd 	l(arm_cubes_n);
 	Eigen::VectorXd 	h(arm_cubes_n);
+	Eigen::DiagonalMatrix<double,Eigen::Dynamic> L(6);
 
 	Eigen::Quaterniond	act_quat;
 	Eigen::Quaterniond ref_shaft_quat, act_shaft_quat, first_cube_quat;
@@ -671,19 +672,46 @@ int main(int argc, char **argv)
     	g.setZero();
     	g.block<6, 6>(6, 0) = -B_eigen.completeOrthogonalDecomposition().pseudoInverse(); // Assegna l'inverso di B alle ultime 6 righe
 
-		h = 2*k_mot*(a_mot*(a_mot*(q_eigen-theta_s)).array().cosh()*q_dot_eigen*(a_mot*theta_d).array().cosh()+(a_mot*theta_d).array().sinh()*theta_d_dot*a_mot*(a_mot*(q_eigen-theta_s)).array().sinh());
-		l = -2*a_mot*k_mot*(a_mot*(q_eigen-theta_s)).array().cosh()*(a_mot*theta_d).array().cosh();
+
+
+		Eigen::ArrayXd operand1 = (a_mot * (q_eigen - theta_s));
+		Eigen::ArrayXd operand2 = (a_mot * theta_d);
+		h[0] = 2*k_mot*(a_mot*cosh(operand1[0])*q_dot_eigen[0]*cosh(operand2[0])+sinh(operand2[0])*theta_d_dot[0]*a_mot*sinh(operand1[0]));
+		h[1] = 2*k_mot*(a_mot*cosh(operand1[1])*q_dot_eigen[1]*cosh(operand2[1])+sinh(operand2[1])*theta_d_dot[1]*a_mot*sinh(operand1[1]));
+		h[2] = 2*k_mot*(a_mot*cosh(operand1[2])*q_dot_eigen[2]*cosh(operand2[2])+sinh(operand2[2])*theta_d_dot[2]*a_mot*sinh(operand1[2]));
+		h[3] = 2*k_mot*(a_mot*cosh(operand1[3])*q_dot_eigen[3]*cosh(operand2[3])+sinh(operand2[3])*theta_d_dot[3]*a_mot*sinh(operand1[3]));
+		h[4] = 2*k_mot*(a_mot*cosh(operand1[4])*q_dot_eigen[4]*cosh(operand2[4])+sinh(operand2[4])*theta_d_dot[4]*a_mot*sinh(operand1[4]));
+		h[5] = 2*k_mot*(a_mot*cosh(operand1[5])*q_dot_eigen[5]*cosh(operand2[5])+sinh(operand2[5])*theta_d_dot[5]*a_mot*sinh(operand1[5]));
+
+
+		
+		l[0] = -2*a_mot*k_mot*cosh(operand1[0])*cosh(operand2[0]);
+		l[1] = -2*a_mot*k_mot*cosh(operand1[1])*cosh(operand2[1]);
+		l[2] = -2*a_mot*k_mot*cosh(operand1[2])*cosh(operand2[2]);
+		l[3] = -2*a_mot*k_mot*cosh(operand1[3])*cosh(operand2[3]);
+		l[4] = -2*a_mot*k_mot*cosh(operand1[4])*cosh(operand2[4]);
+		l[5] = -2*a_mot*k_mot*cosh(operand1[5])*cosh(operand2[5]);
+		L.diagonal() << l[0],l[1],l[2],l[3],l[4],l[5],l[6];
+
+
 		d_tau = -C_eigen*e_ddot+B_eigen*K_v*e_ddot+B_eigen*K_p*e_dot;
 		Eigen::VectorXd e_trasposto_kp;
 		e_trasposto_kp = e.transpose()*K_p;
 		Eigen::VectorXd Vx1(6+6);
 		Vx1.head(6) = e_trasposto_kp;
 		Vx1.tail(6) = e_dot.transpose();
-		tau_elastica = 2*k_mot*((a_mot*theta_d).array().cosh()*(a_mot*(q_eigen-theta_s)).array().sinh());
-		v = d_tau + P.inverse()*(K_c*(tau_computed-tau_elastica)-g.transpose()*Vx1.transpose());
-		tau = l.inverse()*(v-h); // uscita del controllore
+		tau_elastica[0] = 2*k_mot*(cosh(operand2[0])*sinh(operand1[0]));
+		tau_elastica[1] = 2*k_mot*(cosh(operand2[1])*sinh(operand1[1]));
+		tau_elastica[2] = 2*k_mot*(cosh(operand2[2])*sinh(operand1[2]));
+		tau_elastica[3] = 2*k_mot*(cosh(operand2[3])*sinh(operand1[3]));
+		tau_elastica[4] = 2*k_mot*(cosh(operand2[4])*sinh(operand1[4]));
+		tau_elastica[5] = 2*k_mot*(cosh(operand2[5])*sinh(operand1[5]));
+
+
+		v = d_tau + P.inverse()*(K_c*(tau_computed-tau_elastica)-g.transpose()*Vx1);
+		tau = L.inverse()*(v-h); // uscita del controllore
 		theta_s += v/run_freq; 
-		q_ddot_eigen = B_eigen.inverse()*(tau_elastica-C*q_dot_eigen-G);
+		q_ddot_eigen = B_eigen.inverse()*(tau_elastica-C_eigen*q_dot_eigen - G_eigen);
 		q_dot_eigen += q_ddot_eigen/run_freq;
 		q_eigen += q_dot_eigen/run_freq;
 
@@ -773,6 +801,7 @@ int main(int argc, char **argv)
 				}
 			}
 			q(i)	= q_eigen_f(i);
+		}
 
 		if (powerbooster)
 		{
