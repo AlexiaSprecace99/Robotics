@@ -340,7 +340,7 @@ int main(int argc, char **argv)
 	Eigen::VectorXd 	l(arm_cubes_n);
 	Eigen::VectorXd 	h(arm_cubes_n);
 	Eigen::VectorXd 	q_dot_eigen;
-	Eigen::VectorXd 	q_eigen;
+	Eigen::VectorXd 	q_eigen(arm_cubes_n);
 	Eigen::VectorXd 	q_ddot_eigen;
 	Eigen::VectorXd 	qd_dot_eigen;
 	Eigen::VectorXd 	qd_ddot_eigen;
@@ -453,7 +453,6 @@ int main(int argc, char **argv)
 	W << Eigen::MatrixXd::Identity(6, 6);
 	theta_s << Eigen::VectorXd::Zero(6,1);
 	theta_d_dot = 0.1*theta_d_dot.setOnes();
-	theta_d += theta_d_dot/run_freq;
 
 	
 	if(AlterEgoVersion==2){
@@ -550,6 +549,7 @@ int main(int argc, char **argv)
 	KDL::SetToZero(q_dot);
 	KDL::SetToZero(q_ddot);
 
+
 	meas_cube_m1.resize(chain.getNrOfJoints());
 	meas_cube_m2.resize(chain.getNrOfJoints());
 	meas_cube_shaft.resize(chain.getNrOfJoints());
@@ -583,6 +583,23 @@ int main(int argc, char **argv)
 	dyn_solver->JntToMass(q,B); //Initial Inertia Matrix B 
 	dyn_solver->JntToCoriolis(q,q_dot,C); // Initial Coriolis Matrix C
 	dyn_solver->JntToGravity(q, G); //Initial Gravity vector G
+
+		for (int i = 0; i < C.rows(); ++i) {
+    		for (int j = 0; j < C.columns(); ++j) {
+        		C_eigen(i, j) = C(i, j);
+    		}
+		}
+
+				for (int i = 0; i < B.rows(); ++i) {
+    		for (int j = 0; j < B.columns(); ++j) {
+        		B_eigen(i, j) = B(i, j);
+    		}
+		}
+
+        std::cout << "Il valore di B_eigen è : " << B_eigen << std::endl;
+	    std::cout << "Il valore di C_eigen è : " << C_eigen << std::endl;
+
+
 
 	KDL::ChainDynParam dyn_param(chain,gravity_v);
 	q_eigen_f << Eigen::VectorXd::Zero(arm_cubes_n);
@@ -621,12 +638,11 @@ int main(int argc, char **argv)
 
 
 	//Calcolo la posizione dell'e-e attuale e iniziale 
-	jnt_to_pose_solver->JntToCart(meas_cube_shaft, act_frame);
-	jac_dot_solver->JntToJacDot (Vel,jacobian_dot);
 
-	for (int i = 0; i < arm_cubes_n; ++i) {
-        theta_s(i) = (meas_cube_m1(i) + meas_cube_m2(i))/2;
-    }
+
+	//for (int i = 0; i < arm_cubes_n; ++i) {
+    //  theta_s(i) = (meas_cube_m1(i) + meas_cube_m2(i))/2;
+    //}
 
   	// ------------------------------------------------------------------------------------- MAIN LOOP 
   	while (ros::ok())
@@ -637,8 +653,9 @@ int main(int argc, char **argv)
 
 		//err_post << error[0], error[1], error[2], error[3], error[4], error[5];
 		//err_post = K_v*err_post;
-
-
+        theta_d += theta_d_dot/run_freq;
+	    jnt_to_pose_solver->JntToCart(q, act_frame);
+	    jac_dot_solver->JntToJacDot (Vel,jacobian_dot);
 		//jnt_to_pose_solver->JntToCart(q, act_frame);
 		jnt_to_jac_solver->JntToJac(q, JA_kdl);
 
@@ -767,112 +784,103 @@ int main(int argc, char **argv)
 		q_eigen += q_dot_eigen/run_freq;
 		
 
-		// --- Redundancy contribution ---
-		for (int i=0; i<chain.getNrOfJoints(); i++)
-			eq_dot_0(i)	= -K_0(i,i) * (q(i) - (q_max[i]-q_min[i]));
-		
-		eq_dot = JA_pinv*err_post +(Eigen::MatrixXd::Identity( chain.getNrOfJoints(), chain.getNrOfJoints()) -JA_pinv*JA)*eq_dot_0;
 
-		eq += eq_dot/run_freq;
-		
-		if (act_bp == 1 && (ros::Time::now() - cmd_time > max_cmd_time))
-		{
-			eq << Eigen::VectorXd::Zero(arm_cubes_n);
-			start_f_time = ros::Time::now();
-			alpha = 1;
-			flag_pilot_out_ = true;
-		}
-		else
-			flag_pilot_out_ = false;
+		//Ricalcolo B,C e G con le variabili q e q_dot nuove
+		dyn_solver->JntToMass(q,B); //Inertia Matrix B 
+		dyn_solver->JntToCoriolis(q,q_dot,C); // Coriolis Matrix C
+		dyn_solver->JntToGravity(q, G); //Gravity vector G
 
-		// Filtering position
-		if (ros::Time::now()-start_f_time < filt_time){
-			alpha -= 1/(filt_time.toSec() *run_freq);
-			if (alpha < 0)
-				alpha = 0;
-			q_eigen_f = alpha*q_eigen_f + (1-alpha)*q_eigen;
-		}
-		else{
-			q_eigen_f = q_eigen;
-		}
 
-		 // controllo che ognuno di questi gdl sia in un range di 0.3 dallo 0. per (1) considero che ha un offset di +- 0.33
-		if (flag_pilot_out_ && (std::fabs(meas_cube_shaft(0)) < 0.1) && ((std::fabs(meas_cube_shaft(1)) > 0.25) && (std::fabs(meas_cube_shaft(1)) < 0.35)) && (std::fabs(meas_cube_shaft(3)) < 0.1))
-		{
-			std_msgs::Bool msg;
-			msg.data = true;
-			ready_for_pilot.publish(msg);
-		} //Se tutte queste condizioni sono vere, il braccio robotico è considerato "pronto per il pilota" 
-		// e viene inviato un messaggio booleano tramite il topic ready_for_pilot.
-		
+		jnt_to_pose_solver->JntToCart(q, act_frame);
 
-	// Questo ciclo assicura che le posizioni delle articolazioni del braccio robotico siano limitate ai valori massimi e minimi consentiti, 
-		//a seconda della versione del robot e delle condizioni specifiche per alcune articolazioni.
+		JntArrayVel newVel(q, q_dot);
+		Vel =  newVel;
+		jac_dot_solver->JntToJacDot (Vel,jacobian_dot);
+
+
+
 		for (int i = 0; i<arm_cubes_n; i++) {
 			
 			if(AlterEgoVersion==2)
 			{
-				if (q_eigen_f(i) > q_max[i])
+				if (q_eigen(i) > q_max[i])
 				{
-					q_eigen_f(i) = q_max[i];
+					q_eigen(i) = q_max[i];
 				}
-				if (q_eigen_f(i) < q_min[i])
+				if (q_eigen(i) < q_min[i])
 				{
-					q_eigen_f(i) = q_min[i];
+					q_eigen(i) = q_min[i];
 				}
 			}
 			else if(AlterEgoVersion == 3 )
 			{
 				if (i == 1)
 				{
-					if (ns.find("left") != std::string::npos) //distringuo tra braccio sinistro e destro
+					if (ns.find("left") != std::string::npos)
 					{
-						if (q_eigen_f(i) > q_max[i] + 0.33)
+						if (q_eigen(i) > q_max[i] + 0.33)
 						{
-							q_eigen_f(i) = q_max[i] + 0.33;
+							q_eigen(i) = q_max[i] + 0.33;
 						}
-						if (q_eigen_f(i) < q_min[i] + 0.33)
+						if (q_eigen(i) < q_min[i] + 0.33)
 						{
-							q_eigen_f(i) = q_min[i] + 0.33;
+							q_eigen(i) = q_min[i] + 0.33;
 						}
 					}
 					else
 					{
-						if (q_eigen_f(i) > q_max[i] - 0.33)
+						if (q_eigen(i) > q_max[i] - 0.33)
 						{
-							q_eigen_f(i) = q_max[i] - 0.33;
+							q_eigen(i) = q_max[i] - 0.33;
 						}
-						if (q_eigen_f(i) < q_min[i] - 0.33)
+						if (q_eigen(i) < q_min[i] - 0.33)
 						{
-							q_eigen_f(i) = q_min[i] - 0.33;
+							q_eigen(i) = q_min[i] - 0.33;
 						}
 					}
 				}
 				else
 				{
-					if (q_eigen_f(i) > q_max[i])
+					if (q_eigen(i) > q_max[i])
 					{
-						q_eigen_f(i) = q_max[i];
+						q_eigen(i) = q_max[i];
 					}
-					if (q_eigen_f(i) < q_min[i])
+					if (q_eigen(i) < q_min[i])
 					{
-						q_eigen_f(i) = q_min[i];
+						q_eigen(i) = q_min[i];
 					}
 				}
 			}
-			q(i)	= q_eigen_f(i);
+
+			eq(i)   = q_eigen(i);
+			q(i)	= q_eigen(i);
+
 		}
 
-		if (powerbooster)
-		{
-			stiffn_vec = stiffn_vec_power;
-		}
-		else
-		{
-			stiffn_vec = stiffn_vec_no_power;
-		}
+		q_eigen[0] = 0.01;
+		q_eigen[1] = 0.01;
+		q_eigen[2] = 0.01;
+		q_eigen[3] = -0.01;
+		q_eigen[4] = 0.01;
+		q_eigen[5] = 0.01;
 
-		for (int i = 0; i < 6; ++i) {
+
+		// --- set all messages ---
+		arm_eq_ref_msg.data.clear();
+		arm_pr_ref_msg.data.clear();
+		for (int i=0; i<chain.getNrOfJoints(); i++){
+			arm_eq_ref_msg.data.push_back(q_eigen(i));
+			arm_pr_ref_msg.data.push_back(stiffn_vec[i] + (2 * stiffn));
+		}
+		
+
+		// --- publish all messages ---
+		pub_ref_eq_arm_eq.publish(arm_eq_ref_msg);
+		pub_ref_pr_arm_eq.publish(arm_pr_ref_msg);
+		pub_ref_hand_eq.publish(hand_ref_msg);
+		// pub_phantom.publish(phantom_msg);
+
+				for (int i = 0; i < 6; ++i) {
         	q.data[i] = q_eigen(i);
     		}
 
@@ -885,75 +893,6 @@ int main(int argc, char **argv)
 		for (int i = 0; i < 6; ++i) {
         	q_ddot.data[i] = q_ddot_eigen(i);
     		}
-
-		//Ricalcolo B,C e G con le variabili q e q_dot nuove
-		dyn_solver->JntToMass(q,B); //Inertia Matrix B 
-		dyn_solver->JntToCoriolis(q,q_dot,C); // Coriolis Matrix C
-		dyn_solver->JntToGravity(q, G); //Gravity vector G
-
-		jnt_to_pose_solver->JntToCart(q, act_frame);
-
-		JntArrayVel newVel(q, q_dot);
-		Vel =  newVel;
-		jac_dot_solver->JntToJacDot (Vel,jacobian_dot);
-
-		act_frame.M.GetQuaternion(act_quat.x(), act_quat.y(), act_quat.z(), act_quat.w());
-
-		// est. wrench
-		//jnt_to_jac_solver->JntToJac(meas_cube_shaft, J_wrench_kdl);
-		//dyn_solver->JntToGravity(meas_cube_shaft, g_wrench_comp);
-
-		//from KDL to Eig right
-	    for(int i = 0; i < 6 ; i++)
-	    {
-	      for(int j = 0; j < chain.getNrOfJoints() ; j++)
-	      {
-	        Jac_wrench(i, j) = J_wrench_kdl(i, j);
-	      }
-	    }
-
-	    for(int i = 0; i < chain.getNrOfJoints(); i++)
-	    {
-	      Grav_wrench(i) = g_wrench_comp(i); //from KDL to Eig
-
-	      double defl_1_R = meas_cube_shaft(i) - meas_cube_m1(i);	//altrimenti quando calcolo tau la tangente va a inf
-	      double defl_2_R = meas_cube_shaft(i) - meas_cube_m2(i);
-
-	      if (fabs(defl_1_R) > defl_max) defl_1_R = sgn(defl_1_R) * defl_max;
-	      if (fabs(defl_2_R) > defl_max) defl_2_R = sgn(defl_2_R) * defl_max;
-
-	      tau_meas(i) = k_mot * tan(a_mot * (defl_1_R)) + k_mot * tan(a_mot * (defl_2_R));
-	      
-	    }
-
-	    pseudo_inverse(Jac_wrench.transpose(), Jac_trans_pinv_wrench, true);
-	    wrench =  Jac_trans_pinv_wrench * (Grav_wrench + tau_meas);
-
-	    wrench_msg.force.x = wrench(0);
-	    wrench_msg.force.y = wrench(1);
-	    wrench_msg.force.z = wrench(2);
-	    wrench_msg.torque.x = wrench(3);
-	    wrench_msg.torque.y = wrench(4);
-	    wrench_msg.torque.z = wrench(5);
-	    pub_wrench.publish(wrench_msg);
-
-		
-		// --- set all messages ---
-		arm_eq_ref_msg.data.clear();
-		arm_pr_ref_msg.data.clear();
-		for (int i=0; i<chain.getNrOfJoints(); i++){
-			arm_eq_ref_msg.data.push_back(qd(i));
-			arm_pr_ref_msg.data.push_back(stiffn_vec[i] + (2 * stiffn));
-		}
-
-		hand_ref_msg.data = hand_cl;
-
-		// --- publish all messages ---
-		pub_ref_eq_arm_eq.publish(arm_eq_ref_msg);
-		pub_ref_pr_arm_eq.publish(arm_pr_ref_msg);
-		pub_ref_hand_eq.publish(hand_ref_msg);
-		// pub_phantom.publish(phantom_msg);
-		
 		
 		// --- cycle ---
   		ros::spinOnce();
