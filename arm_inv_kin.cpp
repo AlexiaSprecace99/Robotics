@@ -345,13 +345,18 @@ int main(int argc, char **argv)
 	Eigen::VectorXd 	qd_dot_eigen;
 	Eigen::VectorXd 	qd_ddot_eigen;
 	Eigen::VectorXd 	qd_eigen;
-	Eigen::MatrixXd 	jacobian_dot_eigen(arm_cubes_n,arm_cubes_n);
+	Eigen::MatrixXd 	jacobian_dot_eigen(jacobian_dot.rows(),jacobian_dot.columns());
 	Eigen::MatrixXd 	B_eigen(arm_cubes_n,arm_cubes_n);
 	Eigen::MatrixXd 	C_eigen(arm_cubes_n,arm_cubes_n);
-	Eigen::MatrixXd 	G_eigen(arm_cubes_n);
+	Eigen::VectorXd 	G_eigen(arm_cubes_n);
+	Eigen::ArrayXd 		operand1(arm_cubes_n);
+	Eigen::ArrayXd 		operand2(arm_cubes_n);
+	Eigen::VectorXd 	e_trasposto_kp(arm_cubes_n);
+	Eigen::VectorXd 	Vx1(arm_cubes_n+arm_cubes_n);
+	Eigen::Matrix<double, 12, 6> g;
+	g.setZero();
 
-
-	Eigen::DiagonalMatrix<double,Eigen::Dynamic> L(6);
+	Eigen::DiagonalMatrix<double,Eigen::Dynamic> L(arm_cubes_n);
 
 	Eigen::Quaterniond	act_quat;
 	Eigen::Quaterniond ref_shaft_quat, act_shaft_quat, first_cube_quat;
@@ -657,7 +662,7 @@ int main(int argc, char **argv)
 		err_post    << err_twist[0], err_twist[1], err_twist[2], err_twist[3], err_twist[4], err_twist[5];
 		err_post = K_v*err_post;
 
-		
+
 		if (AlterEgoVersion == 2){
 			JA_pinv = JA.transpose()*((JA*JA.transpose() +K_d).inverse());
 		}
@@ -707,7 +712,7 @@ int main(int argc, char **argv)
 		qd_dot = JA_pinv*err_post; //K_v = Lambda
 		qd_ddot = -JA_pinv*K_v*JA*q_dot_eigen-JA_pinv*jacobian_dot_eigen*JA_pinv*err_post;
 
-		/*
+		
 		qd += qd_dot/run_freq;
 		e = qd-q_eigen;
 		e_dot = qd_dot - q_dot_eigen;
@@ -715,14 +720,10 @@ int main(int argc, char **argv)
 		tau_computed = B_eigen*qd_ddot + C_eigen*q_dot_eigen + G_eigen + B_eigen*K_p*e +B_eigen*K_c*e_dot;
 		
 		
-		Eigen::Matrix<double, 12, 6> g;
-    	g.setZero();
     	g.block<6, 6>(6, 0) = -B_eigen.completeOrthogonalDecomposition().pseudoInverse(); // Assegna l'inverso di B alle ultime 6 righe
-
-
-
-		Eigen::ArrayXd operand1 = (a_mot * (q_eigen - theta_s));
-		Eigen::ArrayXd operand2 = (a_mot * theta_d);
+		
+		operand1 = (a_mot * (q_eigen - theta_s));
+		operand2 = (a_mot * theta_d);
 		h[0] = 2*k_mot*(a_mot*cosh(operand1[0])*q_dot_eigen[0]*cosh(operand2[0])+sinh(operand2[0])*theta_d_dot[0]*a_mot*sinh(operand1[0]));
 		h[1] = 2*k_mot*(a_mot*cosh(operand1[1])*q_dot_eigen[1]*cosh(operand2[1])+sinh(operand2[1])*theta_d_dot[1]*a_mot*sinh(operand1[1]));
 		h[2] = 2*k_mot*(a_mot*cosh(operand1[2])*q_dot_eigen[2]*cosh(operand2[2])+sinh(operand2[2])*theta_d_dot[2]*a_mot*sinh(operand1[2]));
@@ -738,15 +739,14 @@ int main(int argc, char **argv)
 		l[3] = -2*a_mot*k_mot*cosh(operand1[3])*cosh(operand2[3]);
 		l[4] = -2*a_mot*k_mot*cosh(operand1[4])*cosh(operand2[4]);
 		l[5] = -2*a_mot*k_mot*cosh(operand1[5])*cosh(operand2[5]);
-		L.diagonal() << l[0],l[1],l[2],l[3],l[4],l[5],l[6];
+		L.diagonal() << l[0],l[1],l[2],l[3],l[4],l[5];
 
-
+		
 		d_tau = -C_eigen*e_ddot+B_eigen*K_c*e_ddot+B_eigen*K_p*e_dot;
 
 
-		Eigen::VectorXd e_trasposto_kp;
 		e_trasposto_kp = e.transpose()*K_p;
-		Eigen::VectorXd Vx1(6+6);
+
 		Vx1.head(6) = e_trasposto_kp;
 		Vx1.tail(6) = e_dot.transpose();
 
@@ -766,7 +766,6 @@ int main(int argc, char **argv)
 		q_dot_eigen += q_ddot_eigen/run_freq;
 		q_eigen += q_dot_eigen/run_freq;
 		
-	/*
 
 		// --- Redundancy contribution ---
 		for (int i=0; i<chain.getNrOfJoints(); i++)
@@ -938,7 +937,7 @@ int main(int argc, char **argv)
 	    wrench_msg.torque.z = wrench(5);
 	    pub_wrench.publish(wrench_msg);
 
-	
+		
 		// --- set all messages ---
 		arm_eq_ref_msg.data.clear();
 		arm_pr_ref_msg.data.clear();
@@ -955,7 +954,7 @@ int main(int argc, char **argv)
 		pub_ref_hand_eq.publish(hand_ref_msg);
 		// pub_phantom.publish(phantom_msg);
 		
-		*/
+		
 		// --- cycle ---
   		ros::spinOnce();
     	loop_rate.sleep();
