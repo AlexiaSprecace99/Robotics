@@ -25,6 +25,7 @@
 #include <std_msgs/Float64.h>
 #include <std_msgs/Bool.h>
 #include <geometry_msgs/Wrench.h>
+#include <kdl/chainjnttojacdotsolver.hpp>
 
 
 using namespace KDL;
@@ -69,8 +70,7 @@ bool use_addon = false;
 * POSTURE CALLBACK                                                     *
 *                                                                      *
 *----------------------------------------------------------------------*/
-void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg) 
-// geometry_msgs/Posestamped contiene Header:ID frame riferimento e timestamp; Pose: position x,y,z e orientation in quaternione x,y,z,w
+void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
 	Eigen::Quaterniond	ref_quat;
 	static Eigen::Quaterniond	old_quat;
@@ -81,13 +81,12 @@ void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
   	tf::Transform transform;
 
 	r_p << msg->pose.position.x, msg->pose.position.y, msg->pose.position.z;
-	r_p = r_p*arm_l; //può darsi che il messaggio era stato normalizzato
+	r_p = r_p*arm_l;
 	r_p.y() += shoulder_l;
 	ref_quat.x() = msg->pose.orientation.x;
 	ref_quat.y() = msg->pose.orientation.y;
 	ref_quat.z() = msg->pose.orientation.z;
 	ref_quat.w() = msg->pose.orientation.w;
-//check sulle ambiguità dei quaternioni e operazioni di allineamento del frame 
 
 	sign_check = ref_quat.w() * old_quat.w() + ref_quat.x() * old_quat.x() + ref_quat.y() * old_quat.y() + ref_quat.z() * old_quat.z();
 	if(sign_check < 0.0){
@@ -97,7 +96,7 @@ void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 	old_quat = ref_quat;
 	r_M = ref_quat;
 
-	r_M =  r_M * R_p_2_r; 
+	r_M =  r_M * R_p_2_r;
 	
 	ref_frame = Frame( Rotation(r_M(0,0), r_M(0,1), r_M(0,2), r_M(1,0), r_M(1,1), r_M(1,2), r_M(2,0), r_M(2,1), r_M(2,2)), Vector(r_p(0), r_p(1), r_p(2)));
 	cmd_time_old = cmd_time;
@@ -216,12 +215,12 @@ int main(int argc, char **argv)
 		side = ns.substr(ns.find("right"));
 	}
 
-	std::string robot_name = std::getenv("ROBOT_NAME"); //ROBOT_NAME = AlterEgo_sim
-	n.getParam("/"+robot_name+"/arm_cubes_n", arm_cubes_n); //preso da file yaml ed è uguale a 6
+	std::string robot_name = std::getenv("ROBOT_NAME");
+	n.getParam("/"+robot_name+"/arm_cubes_n", arm_cubes_n);
 
 	// ------------------------------------------------------------------------------------- Init Var
 	// --- node param ---
-	string 				chain_topic; 
+	string 				chain_topic;
 	string 				pose_ref_topic;
 	string 				stiff_ref_topic;
 	string 				hand_cl_topic;
@@ -264,7 +263,7 @@ int main(int argc, char **argv)
 	char buffer [50];
 
 	// --- kinematics ---
-	std::vector<double>		R_p2r; //vettori dinamici inizializzati con libreria std e classe double
+	std::vector<double>		R_p2r;
 	std::vector<double>		T_h2fwk;
 	std::vector<double>		DH;
 	std::vector<double>		DH_Xtr;
@@ -282,54 +281,92 @@ int main(int argc, char **argv)
 	std::vector<double>		q_max;
 	std::vector<int>		qbmove_tf_ids;
 	int						softhand_tf_id;
-	KDL::Chain 				chain; //inizializzazione della catena mediante libreria KDL
-	boost::scoped_ptr<KDL::ChainFkSolverPos>    jnt_to_pose_solver; //libreria boost usata per la gestione della memoria in modo sicuro
-	boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver; //libreria KDL per cinematica e dinamica
+	KDL::Chain 				chain;
+	KDL::JntSpaceInertiaMatrix	B;
+	KDL::JntArray				C;	
+	boost::scoped_ptr<KDL::ChainFkSolverPos>    jnt_to_pose_solver; //Questo oggetto è un risolutore cinematico diretto per la posizione della catena cinematica del robot.
+	//Questo risolutore può essere utilizzato per calcolare la posizione e l'orientamento dell'end-effector per qualsiasi parte del robot o del sistema senza essere limitato 
+	//a un componente specifico come il "shaft".
+	boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver; // Questo oggetto è un risolutore che calcola il Jacobiano per la catena cinematica del robot.
 	boost::scoped_ptr<KDL::ChainDynParam> 		dyn_solver;
+	boost::scoped_ptr<KDL::ChainJntToJacDotSolver> jac_dot_solver;
 
 	boost::scoped_ptr<KDL::ChainFkSolverPos> shaft_to_pose_solver;
 	boost::scoped_ptr<KDL::ChainJntToJacSolver> shaft_to_jac_solver;
 
-//ChainFkSolverPos -> risolutore cinematica diretta che permette di ottenere matrice 4x4 orientazione e posizione
-//ChainJntToJacSolver -> risolutore cinematica differenziale che permette di ottenere il jacobiano
-//KDL::ChainDynParam -> risolutore che permette di ottenere matrici B,C e forze e momenti applicati
 
-	Eigen::VectorXd qMax_left(arm_cubes_n); //creazione vettore dinamico di 6 elementi
+	Eigen::VectorXd qMax_left(arm_cubes_n);
 	Eigen::VectorXd qMin_left(arm_cubes_n);
 	Eigen::VectorXd qMax_right(arm_cubes_n);
 	Eigen::VectorXd qMin_right(arm_cubes_n);
 
 	KDL::JntArray  		q;
+	KDL::JntArray		q_dot;
+	KDL::JntArray		q_ddot;
+	KDL::Twist			err_twist;
+	KDL::JntArrayVel 	Vel(meas_cube_shaft, q_dot); 	
 	KDL::Jacobian  		JA_kdl;
 	KDL::Jacobian  		J_wrench_kdl;
 	KDL::Frame 			act_frame, frame_grav, shaft_frame;
-	KDL::Twist     		err_twist;
+	KDL::Vector     		error;
 	Eigen::VectorXd		err_post(6);
 	Eigen::VectorXd		x_post(6);
 	Eigen::MatrixXd 	JA(6,arm_cubes_n);
 	Eigen::MatrixXd 	JA_pinv(arm_cubes_n,6);
+	Eigen::MatrixXd 	P(arm_cubes_n,6);
+	KDL::Jacobian 		jacobian_dot(arm_cubes_n);
+
 	
 	Eigen::VectorXd 	eq_dot(arm_cubes_n);
+	Eigen::VectorXd 	theta_s(arm_cubes_n);
+	Eigen::VectorXd 	theta_d_dot(arm_cubes_n);
+	Eigen::VectorXd 	theta_d(arm_cubes_n);
 	Eigen::VectorXd 	eq_dot_0(arm_cubes_n);
 	Eigen::VectorXd 	eq(arm_cubes_n);
-	Eigen::VectorXd 	eq_f(arm_cubes_n);
+	Eigen::VectorXd 	q_eigen_f(arm_cubes_n);
 	Eigen::VectorXd 	q_preset(arm_cubes_n);
 	Eigen::VectorXd 	q_send(arm_cubes_n);
+	Eigen::VectorXd 	qd(arm_cubes_n);
+	Eigen::VectorXd 	qd_dot(arm_cubes_n);
+	Eigen::VectorXd 	qd_ddot(arm_cubes_n);
+	Eigen::VectorXd 	e(arm_cubes_n);
+	Eigen::VectorXd 	e_dot(arm_cubes_n);
+	Eigen::VectorXd 	e_ddot(arm_cubes_n);
+	Eigen::VectorXd 	tau_computed(arm_cubes_n);
+	Eigen::VectorXd 	tau(arm_cubes_n);
+	Eigen::VectorXd 	tau_elastica(arm_cubes_n);
+	Eigen::VectorXd 	d_tau(arm_cubes_n);
+	Eigen::VectorXd 	v(arm_cubes_n);
+	Eigen::VectorXd 	l(arm_cubes_n);
+	Eigen::VectorXd 	h(arm_cubes_n);
+	Eigen::VectorXd 	q_dot_eigen;
+	Eigen::VectorXd 	q_eigen;
+	Eigen::VectorXd 	q_ddot_eigen;
+	Eigen::VectorXd 	qd_dot_eigen;
+	Eigen::VectorXd 	qd_ddot_eigen;
+	Eigen::VectorXd 	qd_eigen;
+	Eigen::MatrixXd 	jacobian_dot_eigen(arm_cubes_n,arm_cubes_n);
+	Eigen::MatrixXd 	B_eigen(arm_cubes_n,arm_cubes_n);
+	Eigen::MatrixXd 	C_eigen(arm_cubes_n,arm_cubes_n);
+	Eigen::MatrixXd 	G_eigen(arm_cubes_n);
+
+
+	Eigen::DiagonalMatrix<double,Eigen::Dynamic> L(6);
 
 	Eigen::Quaterniond	act_quat;
 	Eigen::Quaterniond ref_shaft_quat, act_shaft_quat, first_cube_quat;
 
 	Vector 				gravity_v;
-	double 				cube_m;
+	double 				cube_m; //massa del cubo
 	double 				cube_wrist_m(0.713);
 	double 				cube_m_addon(0.65);
 	double 				hand_m(0.5);
 	RigidBodyInertia 	inert_Q_0, inert_Q_1, inert_Q_2, inert_Q_3, inert_Q_4, inert_Q_5, inert_Q_6;
-	KDL::JntArray 		g_comp;
+	KDL::JntArray 		G;
 	KDL::JntArray 		g_wrench_comp;
 	double				a_mot, k_mot;
 
-    ros::Duration 		max_cmd_time = ros::Duration(1); //specifica intervallo di tempo di un secondo
+    ros::Duration 		max_cmd_time = ros::Duration(1);
     ros::Duration 		filt_time = ros::Duration(5);
     ros::Duration 		max_cmd_latency = ros::Duration(1);
 	ros::Time 			start_raise;
@@ -341,74 +378,77 @@ int main(int argc, char **argv)
     Eigen::MatrixXd Jac_wrench, Jac_trans_pinv_wrench;
     Eigen::VectorXd Grav_wrench;
     Eigen::VectorXd tau_meas;
-    Eigen::VectorXd wrench(6);
-    geometry_msgs::Wrench wrench_msg;
-
-
-
+    Eigen::VectorXd wrench(6); //Vettore di forze o coppie (solitamente a 6 gradi di libertà).
+    geometry_msgs::Wrench wrench_msg; //Un messaggio ROS per rappresentare le forze o le coppie.
 
 
 	// --- Rviz ---
-	tf::TransformBroadcaster ik_br, ik_ref, ik_shaft; //classe che permette di pubblicare trasformazioni di coordinate tra i vari frame di riferimento
-	tf::Transform ik_tf, ik_tf_ref, ik_tf_shaft; //classe che permette di trasformare tra due frame di riferimento
+	tf::TransformBroadcaster ik_br, ik_ref, ik_shaft; // è una classe in ROS che consente di trasmettere trasformazioni TF tra diversi frame di riferimento
+	tf::Transform ik_tf, ik_tf_ref, ik_tf_shaft;
 	
 	// ------------------------------------------------------------------------------------- Check/save args
-	n.getParam("arm_l", arm_l); //0.532
-	n.getParam("shoulder_l", shoulder_l); //0.26 Left ; -0.26 Right
-	n.getParam("DH_table", DH); //[0, -1.57, 0.110, 0, 0, -1.57, 0, 1.57, 0, -1.57, 0.213, 1.57, 0, 1.57, 0, 0, 0.012, -1.57, 0.231, 1.57, -0.06, 0, 0, 1.57] a valori di 4
-	n.getParam("DH_Xtr", DH_Xtr);//[0, 0, 0, 0, -0.012, -0.088] 
-	n.getParam("DH_Xrot", DH_Xrot); //[-1.57, -1.57, -1.57, 1.57, -1.57, 0]
-	n.getParam("DH_Ztr", DH_Ztr); //[0.1528, 0, 0.213, 0, 0.231, 0.032]
-	n.getParam("DH_Zrot", DH_Zrot); //[0, 1.57, 1.57, 0, 1.57, 1.57]
-	n.getParam("T_t2s", T_t2s); //[0, -0.1736, 0.9848, 0.008, 0.9848, -0.1710,-0.0301, 0.108, 0.1736, 0.9698, 0.1710, 0.009, 0, 0, 0, 1] #Torso to Shoulder ( fixed transformation )
-	//trasformazione tra torso e spalla fissata
-	n.getParam("R_p2r", R_p2r); //[0, 0, -1, 0, 1, 0, 1, 0, 0] 
-	n.getParam("T_o2t", T_o2t); // [0, 0, 1, 0.034, 0, -1, 0, 0.2561, 1, 0, 0, 0.035, 0, 0, 0, 1]  
-	// #oculus to Torso ( fixed transformation : transform the commanded position from the oculus accordingly with the distance of the shoulder wrt the torso frame)
-	n.getParam("R_o2b", R_o2b); //[-0.1736, 0, -0.9848,-0.9698,-0.1736, 0.1710, -0.1710, 0.9848, 0.0301]
-	n.getParam("q_min", q_min); //q_min: [-2.3, -0.45, -1.57, -2.09, -1.57, -1.53]
-	n.getParam("q_max", q_max); //q_max: [0.4, 1.37, 1.57, 0, 1.57, 1.3]
-	n.getParam("qbmove_tf_ids", qbmove_tf_ids); //[1, 2, 3, 4, 5, 6]
-	n.getParam("softhand_tf_id", softhand_tf_id); //7
-	n.getParam("pose_ref_topic", pose_ref_topic); //"hand_pos"
-	n.getParam("stiff_ref_topic", stiff_ref_topic); //"stiff_ref_pose"
-	n.getParam("phantom_arm_topic", phantom_arm_topic); //"phantom_left/ego_arm_left_phantom/control/joint_states"
-	n.getParam("ref_eq_arm_topic", ref_eq_arm_topic); //"ref_cubes_eq"
-	n.getParam("ref_pr_arm_topic", ref_pr_arm_topic); //"ref_cubes_preset"
-	n.getParam("ref_hand_topic", ref_hand_topic); //"ref_hand"
-	n.getParam("cubes_m1_topic", cubes_m1_topic); //"meas_arm_m1"
-	n.getParam("cubes_m2_topic", cubes_m2_topic); //"meas_arm_m2"
-	n.getParam("cubes_shaft_topic", cubes_shaft_topic); //"meas_arm_shaft"
-	n.getParam("hand_cl_topic", hand_cl_topic); //"ind"
-	n.getParam("cube_mass", cube_m); //0.5
-	n.getParam("cube_wrist_mass", cube_wrist_m); //0.713
-	n.getParam("cube_addon_mass", cube_m_addon); //0.650
-	n.getParam("hand_mass", hand_m); //0.5
-	n.getParam("T_h2fwk", T_h2fwk); //[0, 0, 1, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1] trasformazione sistema di riferimento mano e 'end-effector' 
-	n.getParam("a_mot", a_mot); //11
-	n.getParam("k_mot", k_mot); //0.02
-	n.getParam("stiffness_vec", stiffn_vec); //[0.0, 0.0, 0.1, 0.1, 0.1, 0.1]
-	n.getParam("ready_pilot_topic", ready_pilot_topic); //"ready_for_pilot"
-	n.getParam("active_back_pos", act_bp); //1
-	n.getParam("stiffness_vec", stiffn_vec_no_power); //[0.0, 0.0, 0.1, 0.1, 0.1, 0.1]
-	n.getParam("stiffness_vec_power", stiffn_vec_power); //[0.0, 0.81, 0.8, 0.6, 0.6, 0.4]
-	n.getParam("R_5to6", R_5to6); //[0, 0, 1, 0, 1, 0, -1, 0, 0]
-	n.getParam("/"+robot_name+"/power_booster_topic", power_booster_topic); // /AlterEgo_sim/power_booster
-	n.getParam("/"+robot_name+"/AlterEgoVersion", AlterEgoVersion); // /AlterEgo_sim/3
-	n.getParam("/"+robot_name+"/use_addon", use_addon); // /AlterEgo_sim/true
+	n.getParam("arm_l", arm_l);
+	n.getParam("shoulder_l", shoulder_l);
+	n.getParam("DH_table", DH);
+	n.getParam("DH_Xtr", DH_Xtr);
+	n.getParam("DH_Xrot", DH_Xrot);
+	n.getParam("DH_Ztr", DH_Ztr);
+	n.getParam("DH_Zrot", DH_Zrot);
+	n.getParam("T_t2s", T_t2s);
+	n.getParam("R_p2r", R_p2r);
+	n.getParam("T_o2t", T_o2t);
+	n.getParam("R_o2b", R_o2b);
+	n.getParam("q_min", q_min);
+	n.getParam("q_max", q_max);
+	n.getParam("qbmove_tf_ids", qbmove_tf_ids);
+	n.getParam("softhand_tf_id", softhand_tf_id);
+	n.getParam("pose_ref_topic", pose_ref_topic);
+	n.getParam("stiff_ref_topic", stiff_ref_topic);
+	n.getParam("phantom_arm_topic", phantom_arm_topic);
+	n.getParam("ref_eq_arm_topic", ref_eq_arm_topic);
+	n.getParam("ref_pr_arm_topic", ref_pr_arm_topic);
+	n.getParam("ref_hand_topic", ref_hand_topic);
+	n.getParam("cubes_m1_topic", cubes_m1_topic);
+	n.getParam("cubes_m2_topic", cubes_m2_topic);
+	n.getParam("cubes_shaft_topic", cubes_shaft_topic);
+	n.getParam("hand_cl_topic", hand_cl_topic);
+	n.getParam("cube_mass", cube_m);
+	n.getParam("cube_wrist_mass", cube_wrist_m);
+	n.getParam("cube_addon_mass", cube_m_addon);
+	n.getParam("hand_mass", hand_m);
+	n.getParam("T_h2fwk", T_h2fwk);
+	n.getParam("a_mot", a_mot);
+	n.getParam("k_mot", k_mot);
+	n.getParam("stiffness_vec", stiffn_vec);
+	n.getParam("ready_pilot_topic", ready_pilot_topic);
+	n.getParam("active_back_pos", act_bp);
+	n.getParam("stiffness_vec", stiffn_vec_no_power);
+	n.getParam("stiffness_vec_power", stiffn_vec_power);
+	n.getParam("R_5to6", R_5to6);
+	n.getParam("/"+robot_name+"/power_booster_topic", power_booster_topic);
+	n.getParam("/"+robot_name+"/AlterEgoVersion", AlterEgoVersion);
+	n.getParam("/"+robot_name+"/use_addon", use_addon);
 
 	int run_freq = 50;
-	n.getParam("/"+robot_name+"/arms_frequency", run_freq);	// Override if configured /AlterEgo_sim/50
+	n.getParam("/"+robot_name+"/arms_frequency", run_freq);	// Override if configured
 	ros::Rate loop_rate(run_freq);
 
 	Eigen::MatrixXd		K_v(6,6);
 	Eigen::MatrixXd		K_d(6,6);
-	Eigen::MatrixXd		K_0(arm_cubes_n,arm_cubes_n); //6x6
+	Eigen::MatrixXd		K_0(arm_cubes_n,arm_cubes_n);
+	Eigen::MatrixXd		K_c(6,6);
+	Eigen::MatrixXd		K_p(6,6); //guadagno utilizzato nel computed torque
 
-	K_d <<  0.1*Eigen::MatrixXd::Identity(6,6); //matrice di guadagni Kd = 0.1 di dimensione 6x6
-	K_0 <<  Eigen::MatrixXd::Zero(arm_cubes_n,arm_cubes_n); //matrice K0 nulla di dimensione 6x6
-	Eigen::MatrixXd W(6, 6); 
-	W << Eigen::MatrixXd::Identity(6, 6); //dichiarazione e inizializzazione matrice W identità di dimensione 6x6
+	K_d <<  0.1*Eigen::MatrixXd::Identity(6,6);
+	K_0 <<  Eigen::MatrixXd::Zero(arm_cubes_n,arm_cubes_n);
+	K_p <<  2*Eigen::MatrixXd::Identity(6,6); //matrice di guadagni Kd = 0.1 di dimensione 6x6
+	K_c <<  2*Eigen::MatrixXd::Identity(6,6); //matrice di guadagni Kc
+	P <<  2*Eigen::MatrixXd::Identity(6,6); //matrice di guadagni 
+	Eigen::MatrixXd W(6, 6);
+	W << Eigen::MatrixXd::Identity(6, 6);
+	theta_s << Eigen::VectorXd::Zero(6,1);
+	theta_d_dot = 0.1*theta_d_dot.setOnes();
+	theta_d += theta_d_dot/run_freq;
 
 	
 	if(AlterEgoVersion==2){
@@ -433,13 +473,6 @@ int main(int argc, char **argv)
 	
 
 	// ------------------------------------------------------------------------------------- Kinematics
-
-//Costruzione catena cinematica: definizione dell'inerzia di ogni singolo segmento (il primo inert_Q0 non serve)
-//Il "telaio" è posizionato sul torso quindi il primo giunto non ha rotazione(NONE) ed è collegato al secondo mediante atrice di rotazione T_t2s
-//il che ci dice che il sistema di riferimento (0,0,0) è posizionato sul torso ed il primo giunto rotoidale(cubo) è sulla spalla
-//sapendo ora che primo giunto è sulla spalla gli altri 4 sono costruiti di conseguenza da DH_table 
-//ultimo segmento ci dice trasformazione tra mano e 'end-effector'; considerando trasformazione essi hanno stessa origine con assi disallineati 
-
 	if(AlterEgoVersion == 2){
 		inert_Q_0 = KDL::RigidBodyInertia(0, KDL::Vector(0.0, 0.0, 0.0)); 					
 		inert_Q_1 = KDL::RigidBodyInertia(cube_m, KDL::Vector(0.0, 0.0, 0.0)); 				
@@ -484,26 +517,33 @@ int main(int argc, char **argv)
 
 
 	
-	g_comp.resize(chain.getNrOfJoints()); //permette di fare in modo che g_comp abbia le componenti pari al numero di giunti della catena cinematica
-	KDL::SetToZero(g_comp); //imposta vettore g_comp a 0
-	g_wrench_comp.resize(chain.getNrOfJoints()); 
+	G.resize(chain.getNrOfJoints());
+	KDL::SetToZero(G);
+	g_wrench_comp.resize(chain.getNrOfJoints());
 
 	tau_meas.resize(chain.getNrOfJoints());
-	Jac_wrench.resize(6, chain.getNrOfJoints()); //matrice 
+	Jac_wrench.resize(6, chain.getNrOfJoints());
 	Jac_trans_pinv_wrench.resize(6, chain.getNrOfJoints());
 
 	gravity_v = KDL::Vector(0,0,-9.81);
 
-	jnt_to_pose_solver.reset(new KDL::ChainFkSolverPos_recursive(chain)); //creazione oggetto serve per calolare posizione e orientamento end-effector quindi cinematica diretta  
-	// e lo sta associando ad un puntatore intelligente
-	jnt_to_jac_solver.reset(new KDL::ChainJntToJacSolver(chain)); //creazione oggetto per calcolo jacobiano
-	shaft_to_pose_solver.reset(new KDL::ChainFkSolverPos_recursive(chain)); //stesse cose di prima ma con nomi diversi
+	jnt_to_pose_solver.reset(new KDL::ChainFkSolverPos_recursive(chain));
+	jnt_to_jac_solver.reset(new KDL::ChainJntToJacSolver(chain));
+	shaft_to_pose_solver.reset(new KDL::ChainFkSolverPos_recursive(chain));
 	shaft_to_jac_solver.reset(new KDL::ChainJntToJacSolver(chain));
-	dyn_solver.reset(new KDL::ChainDynParam(chain,gravity_v)); //creazione oggetto più puntatore intelliggente per matrici dinamica
+	dyn_solver.reset(new KDL::ChainDynParam(chain,gravity_v));
+	jac_dot_solver.reset(new KDL::ChainJntToJacDotSolver(chain));
 	
 	q.resize(chain.getNrOfJoints());
+	q_dot.resize(chain.getNrOfJoints());
+	q_ddot.resize(chain.getNrOfJoints());
 	JA_kdl.resize(chain.getNrOfJoints());
+	q_dot_eigen.resize(chain.getNrOfJoints());
+	q_eigen.resize(chain.getNrOfJoints());
+	q_ddot_eigen.resize(chain.getNrOfJoints());
 	KDL::SetToZero(q);
+	KDL::SetToZero(q_dot);
+	KDL::SetToZero(q_ddot);
 
 	meas_cube_m1.resize(chain.getNrOfJoints());
 	meas_cube_m2.resize(chain.getNrOfJoints());
@@ -513,11 +553,11 @@ int main(int argc, char **argv)
 	Grav_wrench.resize(chain.getNrOfJoints());
 	double defl_max = 0.6;
 
-	shaft_to_pose_solver->JntToCart(meas_cube_shaft, shaft_frame); //esegue cinematica diretta con input la meas_cube_shaft e output shaft_frame
-	jnt_to_pose_solver->JntToCart(q, ref_frame); //JntToCart è la funzione che lo esegue
-	jnt_to_jac_solver->JntToJac(q, JA_kdl);
+	shaft_to_pose_solver->JntToCart(meas_cube_shaft, shaft_frame);
+	jnt_to_pose_solver->JntToCart(q, ref_frame);
+	KDL::Vector	pos_end_effector = ref_frame.p; //postura dell'e-e desiderata (braccio in posizione di equilibrio)
 
-	//Ciclo for che mi permette di modificare il jacobiano in uscita dal risolutore; se elemento minore di una certa soglia llora considerato = 0 
+	jnt_to_jac_solver->JntToJac(q, JA_kdl);
 	for (int i = 0; i < 6; i++)
 	{
 		for (int j = 0; j < arm_cubes_n; j++)
@@ -535,28 +575,27 @@ int main(int argc, char **argv)
 	}	
 	ref_twist << 0, 0, 0, 0, 0, 0;
 
-	eq << Eigen::VectorXd::Zero(arm_cubes_n);
+	dyn_solver->JntToMass(q,B); //Initial Inertia Matrix B 
+	dyn_solver->JntToCoriolis(q,q_dot,C); // Initial Coriolis Matrix C
+	dyn_solver->JntToGravity(q, G); //Initial Gravity vector G
 
-	eq_f << Eigen::VectorXd::Zero(arm_cubes_n);
-
-
-	q_preset << Eigen::VectorXd::Zero(arm_cubes_n);
+	KDL::ChainDynParam dyn_param(chain,gravity_v);
+	q_eigen_f << Eigen::VectorXd::Zero(arm_cubes_n);
 
 	// stiffn = MAX_STIFF;
 
 	hand_cl = 0;
 	R_p_2_r << R_p2r[0], R_p2r[1], R_p2r[2],
 		R_p2r[3], R_p2r[4], R_p2r[5],
-		R_p2r[6], R_p2r[7], R_p2r[8]; //matrice 3x3 rotazione di 90 gradi intorno asse z e y
+		R_p2r[6], R_p2r[7], R_p2r[8];
 
 	// ------------------------------------------------------------------------------------- Subscribe to topics
-	//
-  	sub_posture		= n.subscribe(pose_ref_topic, 1, posture__Callback); //sottoscrittore di messaggi dal topic pose_ref_topic che rappresenta la posizione e orientazione(in quaternioni) della mano
+  	sub_posture		= n.subscribe(pose_ref_topic, 1, posture__Callback);
   	sub_stiffness	= n.subscribe(stiff_ref_topic, 1, arm_stiffness__Callback);
   	sub_hand_cl		= n.subscribe(hand_cl_topic, 1, hand_closure__Callback);
-  	sub_cubes_m1	= n.subscribe(cubes_m1_topic, 1, cubes_m1__Callback); //prende da sim_qb_manager
-  	sub_cubes_m2	= n.subscribe(cubes_m2_topic, 1, cubes_m2__Callback); //prende da sim_qb_manager
-  	sub_cubes_shaft	= n.subscribe(cubes_shaft_topic, 1, cubes_shaft__Callback); //prende da sim_qb_manager
+  	sub_cubes_m1	= n.subscribe(cubes_m1_topic, 1, cubes_m1__Callback);
+  	sub_cubes_m2	= n.subscribe(cubes_m2_topic, 1, cubes_m2__Callback);
+  	sub_cubes_shaft	= n.subscribe(cubes_shaft_topic, 1, cubes_shaft__Callback);
 	sub_powerbooster = n.subscribe("/"+robot_name+"/"+power_booster_topic, 1, powerbooster__Callback);
 
 
@@ -576,32 +615,158 @@ int main(int argc, char **argv)
 	cmd_time_old = ros::Time::now();
 
 
+	//Calcolo la posizione dell'e-e attuale e iniziale 
+	jnt_to_pose_solver->JntToCart(meas_cube_shaft, act_frame);
+	jac_dot_solver->JntToJacDot (Vel,jacobian_dot);
+
+	for (int i = 0; i < arm_cubes_n; ++i) {
+        theta_s(i) = (meas_cube_m1(i) + meas_cube_m2(i))/2;
+    }
+
   	// ------------------------------------------------------------------------------------- MAIN LOOP 
   	while (ros::ok())
-  	{
+  	{ 
+  	
+		//error = pos_end_effector - pos_end_effector_act; //err_twist è calcolato come la differenza tra due frame, act_frame e ref_frame. 
+		//Questo rappresenta l'errore tra la posizione e l'orientamento desiderati (ref_frame) e la posizione e l'orientamento attuali (act_frame) dell'end-effector del robot.
 
-  		// --- Inverse Kinematics ---
-  		jnt_to_pose_solver->JntToCart(q, act_frame);
+		//err_post << error[0], error[1], error[2], error[3], error[4], error[5];
+		//err_post = K_v*err_post;
+
+
+		//jnt_to_pose_solver->JntToCart(q, act_frame);
 		jnt_to_jac_solver->JntToJac(q, JA_kdl);
-		for (int i = 0; i<6; i++){
-			for (int j = 0; j< chain.getNrOfJoints(); j++)
-				if(fabs(JA_kdl(i,j)) > 0.000001)
-					JA(i,j) = JA_kdl(i,j);
-				else
-					JA(i,j) = 0;
-		}
 
-		err_twist = KDL::diff(act_frame, ref_frame);
+        for (int i = 0; i<6; i++){
 
-		err_post 	<< err_twist[0], err_twist[1], err_twist[2], err_twist[3], err_twist[4], err_twist[5];
+            for (int j = 0; j< chain.getNrOfJoints(); j++)
+
+                if(fabs(JA_kdl(i,j)) > 0.000001)
+
+                    JA(i,j) = JA_kdl(i,j);
+
+                else
+
+                    JA(i,j) = 0;
+
+        }
+
+ 
+
+        err_twist = KDL::diff(act_frame, ref_frame);
+		err_post    << err_twist[0], err_twist[1], err_twist[2], err_twist[3], err_twist[4], err_twist[5];
 		err_post = K_v*err_post;
 
+		
 		if (AlterEgoVersion == 2){
 			JA_pinv = JA.transpose()*((JA*JA.transpose() +K_d).inverse());
 		}
 		else if(AlterEgoVersion == 3){
 			JA_pinv = W.inverse() * JA.transpose() * ((JA * W.inverse() * JA.transpose() + K_d).inverse());
 		}
+
+		
+		for (int i = 0; i < 6; ++i) {
+    		q_dot_eigen(i) = q_dot(i);
+		}
+
+
+        for (int i = 0; i < jacobian_dot.rows(); ++i) {
+    		for (int j = 0; j < jacobian_dot.columns(); ++j) {
+        		jacobian_dot_eigen(i, j) = jacobian_dot(i, j);
+    		}
+		}
+
+		for (int i = 0; i < q.rows(); ++i) {
+    		q_eigen(i) = q(i);
+		}
+
+
+		for (int i = 0; i < G.rows(); ++i) {
+    		G_eigen(i) = G(i);
+		}
+
+
+		for (int i = 0; i < B.rows(); ++i) {
+    		for (int j = 0; j < B.columns(); ++j) {
+        		B_eigen(i, j) = B(i, j);
+    		}
+		}
+
+		for (int i = 0; i < C.rows(); ++i) {
+    		for (int j = 0; j < C.columns(); ++j) {
+        		C_eigen(i, j) = C(i, j);
+    		}
+		}
+
+		for (int i = 0; i < q_ddot.rows(); ++i) {
+    		q_ddot_eigen(i) = q_ddot(i);
+		}
+		
+		//Kinematic Reference (Calcolo di qd_dot e qd_ddot)
+		qd_dot = JA_pinv*err_post; //K_v = Lambda
+		qd_ddot = -JA_pinv*K_v*JA*q_dot_eigen-JA_pinv*jacobian_dot_eigen*JA_pinv*err_post;
+
+		/*
+		qd += qd_dot/run_freq;
+		e = qd-q_eigen;
+		e_dot = qd_dot - q_dot_eigen;
+		e_ddot = qd_ddot - q_ddot_eigen;
+		tau_computed = B_eigen*qd_ddot + C_eigen*q_dot_eigen + G_eigen + B_eigen*K_p*e +B_eigen*K_c*e_dot;
+		
+		
+		Eigen::Matrix<double, 12, 6> g;
+    	g.setZero();
+    	g.block<6, 6>(6, 0) = -B_eigen.completeOrthogonalDecomposition().pseudoInverse(); // Assegna l'inverso di B alle ultime 6 righe
+
+
+
+		Eigen::ArrayXd operand1 = (a_mot * (q_eigen - theta_s));
+		Eigen::ArrayXd operand2 = (a_mot * theta_d);
+		h[0] = 2*k_mot*(a_mot*cosh(operand1[0])*q_dot_eigen[0]*cosh(operand2[0])+sinh(operand2[0])*theta_d_dot[0]*a_mot*sinh(operand1[0]));
+		h[1] = 2*k_mot*(a_mot*cosh(operand1[1])*q_dot_eigen[1]*cosh(operand2[1])+sinh(operand2[1])*theta_d_dot[1]*a_mot*sinh(operand1[1]));
+		h[2] = 2*k_mot*(a_mot*cosh(operand1[2])*q_dot_eigen[2]*cosh(operand2[2])+sinh(operand2[2])*theta_d_dot[2]*a_mot*sinh(operand1[2]));
+		h[3] = 2*k_mot*(a_mot*cosh(operand1[3])*q_dot_eigen[3]*cosh(operand2[3])+sinh(operand2[3])*theta_d_dot[3]*a_mot*sinh(operand1[3]));
+		h[4] = 2*k_mot*(a_mot*cosh(operand1[4])*q_dot_eigen[4]*cosh(operand2[4])+sinh(operand2[4])*theta_d_dot[4]*a_mot*sinh(operand1[4]));
+		h[5] = 2*k_mot*(a_mot*cosh(operand1[5])*q_dot_eigen[5]*cosh(operand2[5])+sinh(operand2[5])*theta_d_dot[5]*a_mot*sinh(operand1[5]));
+
+
+		
+		l[0] = -2*a_mot*k_mot*cosh(operand1[0])*cosh(operand2[0]);
+		l[1] = -2*a_mot*k_mot*cosh(operand1[1])*cosh(operand2[1]);
+		l[2] = -2*a_mot*k_mot*cosh(operand1[2])*cosh(operand2[2]);
+		l[3] = -2*a_mot*k_mot*cosh(operand1[3])*cosh(operand2[3]);
+		l[4] = -2*a_mot*k_mot*cosh(operand1[4])*cosh(operand2[4]);
+		l[5] = -2*a_mot*k_mot*cosh(operand1[5])*cosh(operand2[5]);
+		L.diagonal() << l[0],l[1],l[2],l[3],l[4],l[5],l[6];
+
+
+		d_tau = -C_eigen*e_ddot+B_eigen*K_c*e_ddot+B_eigen*K_p*e_dot;
+
+
+		Eigen::VectorXd e_trasposto_kp;
+		e_trasposto_kp = e.transpose()*K_p;
+		Eigen::VectorXd Vx1(6+6);
+		Vx1.head(6) = e_trasposto_kp;
+		Vx1.tail(6) = e_dot.transpose();
+
+
+		tau_elastica[0] = 2*k_mot*(cosh(operand2[0])*sinh(operand1[0]));
+		tau_elastica[1] = 2*k_mot*(cosh(operand2[1])*sinh(operand1[1]));
+		tau_elastica[2] = 2*k_mot*(cosh(operand2[2])*sinh(operand1[2]));
+		tau_elastica[3] = 2*k_mot*(cosh(operand2[3])*sinh(operand1[3]));
+		tau_elastica[4] = 2*k_mot*(cosh(operand2[4])*sinh(operand1[4]));
+		tau_elastica[5] = 2*k_mot*(cosh(operand2[5])*sinh(operand1[5]));
+
+
+		v = d_tau + P.inverse()*(K_c*(tau_computed-tau_elastica)-g.transpose()*Vx1);
+		tau = L.inverse()*(v-h); // uscita del controllore
+		theta_s += tau/run_freq; 
+		q_ddot_eigen = B_eigen.inverse()*(tau_elastica-C_eigen*q_dot_eigen - G_eigen);
+		q_dot_eigen += q_ddot_eigen/run_freq;
+		q_eigen += q_dot_eigen/run_freq;
+		
+	/*
 
 		// --- Redundancy contribution ---
 		for (int i=0; i<chain.getNrOfJoints(); i++)
@@ -610,7 +775,7 @@ int main(int argc, char **argv)
 		eq_dot = JA_pinv*err_post +(Eigen::MatrixXd::Identity( chain.getNrOfJoints(), chain.getNrOfJoints()) -JA_pinv*JA)*eq_dot_0;
 
 		eq += eq_dot/run_freq;
-		// Back position
+		
 		if (act_bp == 1 && (ros::Time::now() - cmd_time > max_cmd_time))
 		{
 			eq << Eigen::VectorXd::Zero(arm_cubes_n);
@@ -626,10 +791,10 @@ int main(int argc, char **argv)
 			alpha -= 1/(filt_time.toSec() *run_freq);
 			if (alpha < 0)
 				alpha = 0;
-			eq_f = alpha*eq_f + (1-alpha)*eq;
+			q_eigen_f = alpha*q_eigen_f + (1-alpha)*q_eigen;
 		}
 		else{
-			eq_f = eq;
+			q_eigen_f = q_eigen;
 		}
 
 		 // controllo che ognuno di questi gdl sia in un range di 0.3 dallo 0. per (1) considero che ha un offset di +- 0.33
@@ -638,71 +803,66 @@ int main(int argc, char **argv)
 			std_msgs::Bool msg;
 			msg.data = true;
 			ready_for_pilot.publish(msg);
-		}
+		} //Se tutte queste condizioni sono vere, il braccio robotico è considerato "pronto per il pilota" 
+		// e viene inviato un messaggio booleano tramite il topic ready_for_pilot.
 		
+
+	// Questo ciclo assicura che le posizioni delle articolazioni del braccio robotico siano limitate ai valori massimi e minimi consentiti, 
+		//a seconda della versione del robot e delle condizioni specifiche per alcune articolazioni.
 		for (int i = 0; i<arm_cubes_n; i++) {
 			
 			if(AlterEgoVersion==2)
 			{
-				if (eq_f(i) > q_max[i])
+				if (q_eigen_f(i) > q_max[i])
 				{
-					eq_f(i) = q_max[i];
+					q_eigen_f(i) = q_max[i];
 				}
-				if (eq_f(i) < q_min[i])
+				if (q_eigen_f(i) < q_min[i])
 				{
-					eq_f(i) = q_min[i];
+					q_eigen_f(i) = q_min[i];
 				}
 			}
 			else if(AlterEgoVersion == 3 )
 			{
 				if (i == 1)
 				{
-					if (ns.find("left") != std::string::npos)
+					if (ns.find("left") != std::string::npos) //distringuo tra braccio sinistro e destro
 					{
-						if (eq_f(i) > q_max[i] + 0.33)
+						if (q_eigen_f(i) > q_max[i] + 0.33)
 						{
-							eq_f(i) = q_max[i] + 0.33;
+							q_eigen_f(i) = q_max[i] + 0.33;
 						}
-						if (eq_f(i) < q_min[i] + 0.33)
+						if (q_eigen_f(i) < q_min[i] + 0.33)
 						{
-							eq_f(i) = q_min[i] + 0.33;
+							q_eigen_f(i) = q_min[i] + 0.33;
 						}
 					}
 					else
 					{
-						if (eq_f(i) > q_max[i] - 0.33)
+						if (q_eigen_f(i) > q_max[i] - 0.33)
 						{
-							eq_f(i) = q_max[i] - 0.33;
+							q_eigen_f(i) = q_max[i] - 0.33;
 						}
-						if (eq_f(i) < q_min[i] - 0.33)
+						if (q_eigen_f(i) < q_min[i] - 0.33)
 						{
-							eq_f(i) = q_min[i] - 0.33;
+							q_eigen_f(i) = q_min[i] - 0.33;
 						}
 					}
 				}
 				else
 				{
-					if (eq_f(i) > q_max[i])
+					if (q_eigen_f(i) > q_max[i])
 					{
-						eq_f(i) = q_max[i];
+						q_eigen_f(i) = q_max[i];
 					}
-					if (eq_f(i) < q_min[i])
+					if (q_eigen_f(i) < q_min[i])
 					{
-						eq_f(i) = q_min[i];
+						q_eigen_f(i) = q_min[i];
 					}
 				}
 			}
-
-			eq(i)   = eq_f(i);
-			q(i)	= eq_f(i);
-
+			q(i)	= q_eigen_f(i);
 		}
-		if(VERBOSE) std::cout<< ns << "Version" << AlterEgoVersion <<" Q :\n " << eq_f << std::endl;
-
-
-		// Gravity Comp
-		dyn_solver->JntToGravity(q, g_comp);
-
 
 		if (powerbooster)
 		{
@@ -713,86 +873,36 @@ int main(int argc, char **argv)
 			stiffn_vec = stiffn_vec_no_power;
 		}
 
-		//deflection
-		for (int i=0; i<arm_cubes_n; i++){
-			
-			if(AlterEgoVersion == 2)
-			{
-				if(VERBOSE) std::cout<< ns << "Version" << AlterEgoVersion <<" Q_send deflection:\n " << q_send << std::endl;
-				
-				q_preset(i) = 1 / a_mot * (asinh(g_comp(i) / (2 * k_mot * cosh(a_mot * stiffn_vec[i]))));
-
-				if (isnan(q_preset(i))){
-					q_preset(i) = 0;
-				}
-
-				q_send(i) = q(i) + q_preset(i);
-			}
-			else if(AlterEgoVersion == 3)
-			{
-				
-				if (i == 0)
-					q_preset(i) = 0;
-				else
-					q_preset(i) = 1 / a_mot * (asinh(g_comp(i) / (2 * k_mot * cosh(a_mot * stiffn_vec[i]))));
-
-				if (isnan(q_preset(i))){
-					q_preset(i) = 0;
-				}
-				// [Shoulder Add-on]
-				switch (i)
-				{
-				case 0:
-					q_send(i) = q(i); // q_send(i) = 2.086*(q(i) +q_preset(i)-(0.95));     //54.5° -> 0.95rad flange offset w.r.t. cube zero position
-					if (q_send(i) > q_max[i])
-						q_send(i) = q_max[i]; // 3.14
-					if (q_send(i) < q_min[i])
-						q_send(i) = q_min[i];
-
-					break;
-				case 1:
-					if (ns.find("left") != std::string::npos)
-						{
-							if(VERBOSE) std::cout<< "-----------------------------------"<< ns << std::endl;
-
-							q_send(i) = 2.086 * (q(i) + q_preset(i) - (0.33)); // 19° -> 0.33rad flange offset w.r.t. cube zero position
-						}
-					else
-						q_send(i) = 2.086 * (q(i) + q_preset(i) + (0.33)); // 19° -> 0.33rad flange offset w.r.t. cube zero position
-
-					if (q_send(i) > 2.086 * q_max[i])
-						q_send(i) = 2.086 * q_max[i]; // 3.14
-					if (q_send(i) < 2.086 * q_min[i])
-						q_send(i) = 2.086 * q_min[i];
-					break;
-				default:
-					q_send(i) = q(i) + q_preset(i);
-					break;
-				}
-			}
-
-		}
-		if(VERBOSE) std::cout<< ns << "Version" << AlterEgoVersion <<" Q_preset deflection:\n " << q_preset << std::endl;
-		if(VERBOSE) std::cout<< ns << "Version" << AlterEgoVersion <<" Q_send: \n" << q_send << std::endl;
-		q_send(arm_cubes_n - 1) = q(arm_cubes_n - 1);
+		for (int i = 0; i < 6; ++i) {
+        	q.data[i] = q_eigen(i);
+    		}
 
 		
-		for (int i = 0; i<arm_cubes_n; i++) {
-			// when Alteregoversion =3 is just for arm cubes [Shoulder Add-on]
-			if(AlterEgoVersion == 2 || (i == 2 && AlterEgoVersion == 3) )
-			{
-				if (q_send(i) > (q_max[i]+q_preset(i)))
-					q_send(i) = q_max[i]+q_preset(i);
-				if (q_send(i) < (q_min[i]+q_preset(i)))
-					q_send(i) = (q_min[i]+q_preset(i));
-			}
-		}
+		// q_dot e q_ddot da Eigen a JntArray
+		for (int i = 0; i < 6; ++i) {
+        	q_dot.data[i] = q_dot_eigen(i);
+    		}
+
+		for (int i = 0; i < 6; ++i) {
+        	q_ddot.data[i] = q_ddot_eigen(i);
+    		}
+
+		//Ricalcolo B,C e G con le variabili q e q_dot nuove
+		dyn_solver->JntToMass(q,B); //Inertia Matrix B 
+		dyn_solver->JntToCoriolis(q,q_dot,C); // Coriolis Matrix C
+		dyn_solver->JntToGravity(q, G); //Gravity vector G
+
+		jnt_to_pose_solver->JntToCart(q, act_frame);
+
+		JntArrayVel newVel(q, q_dot);
+		Vel =  newVel;
+		jac_dot_solver->JntToJacDot (Vel,jacobian_dot);
 
 		act_frame.M.GetQuaternion(act_quat.x(), act_quat.y(), act_quat.z(), act_quat.w());
 
 		// est. wrench
-		jnt_to_jac_solver->JntToJac(meas_cube_shaft, J_wrench_kdl);
-		dyn_solver->JntToGravity(meas_cube_shaft, g_wrench_comp);
+		//jnt_to_jac_solver->JntToJac(meas_cube_shaft, J_wrench_kdl);
+		//dyn_solver->JntToGravity(meas_cube_shaft, g_wrench_comp);
 
 		//from KDL to Eig right
 	    for(int i = 0; i < 6 ; i++)
@@ -828,54 +938,28 @@ int main(int argc, char **argv)
 	    wrench_msg.torque.z = wrench(5);
 	    pub_wrench.publish(wrench_msg);
 
+	
 		// --- set all messages ---
 		arm_eq_ref_msg.data.clear();
 		arm_pr_ref_msg.data.clear();
 		for (int i=0; i<chain.getNrOfJoints(); i++){
-			arm_eq_ref_msg.data.push_back(q_send(i));
+			arm_eq_ref_msg.data.push_back(qd(i));
 			arm_pr_ref_msg.data.push_back(stiffn_vec[i] + (2 * stiffn));
 		}
+
 		hand_ref_msg.data = hand_cl;
-
-		// Rviz TF:
-		// act_frame.M.GetQuaternion(act_quat.x(), act_quat.y(), act_quat.z(), act_quat.w());
-		// ik_tf.setRotation(tf::Quaternion(act_quat.x(), act_quat.y(), act_quat.z(), act_quat.w()));
-		// ik_tf.setOrigin(tf::Vector3(act_frame.p[0], act_frame.p[1], act_frame.p[2]));
-		// ik_br.sendTransform(tf::StampedTransform(ik_tf, ros::Time::now(), "torso", side + "_ego_ik"));
-
-		ref_frame.M.GetQuaternion(ref_shaft_quat.x(), ref_shaft_quat.y(), ref_shaft_quat.z(), ref_shaft_quat.w());
-		ik_tf_ref.setRotation(tf::Quaternion(ref_shaft_quat.x(), ref_shaft_quat.y(), ref_shaft_quat.z(), ref_shaft_quat.w()));
-		ik_tf_ref.setOrigin(tf::Vector3(ref_frame.p[0], ref_frame.p[1], ref_frame.p[2]));
-		ik_ref.sendTransform(tf::StampedTransform(ik_tf_ref, ros::Time::now(), "torso", side + "_hand_ref"));
-
-		shaft_to_pose_solver->JntToCart(meas_cube_shaft, shaft_frame);
-		shaft_frame.M.GetQuaternion(act_shaft_quat.x(), act_shaft_quat.y(), act_shaft_quat.z(), act_shaft_quat.w());
-		ik_tf_shaft.setOrigin(tf::Vector3(shaft_frame.p[0], shaft_frame.p[1], shaft_frame.p[2]));
-		ik_tf_shaft.setRotation(tf::Quaternion(act_shaft_quat.x(), act_shaft_quat.y(), act_shaft_quat.z(), act_shaft_quat.w()));
-		ik_shaft.sendTransform(tf::StampedTransform(ik_tf_shaft, ros::Time::now(), "torso", side + "_hand_curr"));
-
-		// Rviz model:
-		phantom_msg.name.resize(chain.getNrOfJoints() + 1);
-		phantom_msg.position.resize(chain.getNrOfJoints() + 1);
-		for (int i=0; i<chain.getNrOfJoints(); i++){
-			 sprintf (buffer, "phantom_cube%d_shaft_joint", qbmove_tf_ids[i]);
-			 phantom_msg.name[i] = buffer;
-			phantom_msg.position[i] = q(i);
-		}
-		sprintf (buffer, "phantom_hand%d_synergy_joint", softhand_tf_id);
-		phantom_msg.name[5] = buffer;
-		phantom_msg.position[5] = hand_cl;
-
 
 		// --- publish all messages ---
 		pub_ref_eq_arm_eq.publish(arm_eq_ref_msg);
 		pub_ref_pr_arm_eq.publish(arm_pr_ref_msg);
 		pub_ref_hand_eq.publish(hand_ref_msg);
 		// pub_phantom.publish(phantom_msg);
-
-
+		
+		*/
 		// --- cycle ---
   		ros::spinOnce();
     	loop_rate.sleep();
-  	}
+		
+  		
+	}
 }
