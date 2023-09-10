@@ -26,10 +26,21 @@
 #include <std_msgs/Bool.h>
 #include <geometry_msgs/Wrench.h>
 #include <kdl/chainjnttojacdotsolver.hpp>
+#include <kdl/frames.hpp>
+#include <ego_msgs/alterego_state.h> 
+#include <rbdl/rbdl.h>
+#include <rbdl/Dynamics.h>
+#include <rbdl/addons/urdfreader/urdfreader.h>
+#include <ros/package.h>
+//#include <kdl_parser/kdl_parser.hpp>
+
 
 
 using namespace KDL;
 using namespace std;
+
+using namespace RigidBodyDynamics;
+using namespace RigidBodyDynamics::Math;
 
 bool VERBOSE =  false;
 
@@ -70,7 +81,7 @@ bool use_addon = false;
 * POSTURE CALLBACK                                                     *
 *                                                                      *
 *----------------------------------------------------------------------*/
-void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+/*void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
 	Eigen::Quaterniond	ref_quat;
 	static Eigen::Quaterniond	old_quat;
@@ -101,13 +112,13 @@ void posture__Callback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 	ref_frame = Frame( Rotation(r_M(0,0), r_M(0,1), r_M(0,2), r_M(1,0), r_M(1,1), r_M(1,2), r_M(2,0), r_M(2,1), r_M(2,2)), Vector(r_p(0), r_p(1), r_p(2)));
 	cmd_time_old = cmd_time;
 	cmd_time = ros::Time::now();
-}
+}*/
 
 /*---------------------------------------------------------------------*
 * STIFFNESS CALLBACK                                                   *
 *                                                                      *
 *----------------------------------------------------------------------*/
-void arm_stiffness__Callback(const std_msgs::Float64::ConstPtr& msg)
+/*void arm_stiffness__Callback(const std_msgs::Float64::ConstPtr& msg)
 {
 	stiffn = msg->data*MAX_STIFF;
 
@@ -175,11 +186,11 @@ void cubes_shaft__Callback(const std_msgs::Float64MultiArray::ConstPtr& msg)
  * PowerBooster CALLBACK                                                *
  *                                                                      *
  *----------------------------------------------------------------------*/
-void powerbooster__Callback(const std_msgs::Bool::ConstPtr &msg)
+/*void powerbooster__Callback(const std_msgs::Bool::ConstPtr &msg)
 {
 
 	powerbooster = msg->data;
-}
+}*/
 
 
 
@@ -187,7 +198,7 @@ void powerbooster__Callback(const std_msgs::Bool::ConstPtr &msg)
 * HAND CLOSURE CALLBACK                                                *
 *                                                                      *
 *----------------------------------------------------------------------*/
-void hand_closure__Callback(const std_msgs::Float64::ConstPtr& msg)
+/*void hand_closure__Callback(const std_msgs::Float64::ConstPtr& msg)
 {
 	hand_cl = msg->data;
 }
@@ -196,7 +207,7 @@ int sgn(double d)
 {
     return d<0? -1 : d>0; 
 }
-
+*/
 /*---------------------------------------------------------------------*
 * MAIN                                                                 *
 *                                                                      *
@@ -281,10 +292,7 @@ int main(int argc, char **argv)
 	std::vector<double>		q_max;
 	std::vector<int>		qbmove_tf_ids;
 	int						softhand_tf_id;
-	KDL::Chain 				chain;
-	KDL::JntSpaceInertiaMatrix	B;
-	KDL::JntArray				C;	
-	boost::scoped_ptr<KDL::ChainFkSolverPos>    jnt_to_pose_solver; //Questo oggetto è un risolutore cinematico diretto per la posizione della catena cinematica del robot.
+	/*boost::scoped_ptr<KDL::ChainFkSolverPos>    jnt_to_pose_solver; //Questo oggetto è un risolutore cinematico diretto per la posizione della catena cinematica del robot.
 	//Questo risolutore può essere utilizzato per calcolare la posizione e l'orientamento dell'end-effector per qualsiasi parte del robot o del sistema senza essere limitato 
 	//a un componente specifico come il "shaft".
 	boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver; // Questo oggetto è un risolutore che calcola il Jacobiano per la catena cinematica del robot.
@@ -298,9 +306,9 @@ int main(int argc, char **argv)
 	Eigen::VectorXd qMax_left(arm_cubes_n);
 	Eigen::VectorXd qMin_left(arm_cubes_n);
 	Eigen::VectorXd qMax_right(arm_cubes_n);
-	Eigen::VectorXd qMin_right(arm_cubes_n);
+	Eigen::VectorXd qMin_right(arm_cubes_n);*/
 
-	KDL::JntArray  		q;
+	/*KDL::JntArray  		q;
 	KDL::JntArray		q_dot;
 	KDL::JntArray		q_ddot;
 	KDL::Twist			err_twist;
@@ -309,12 +317,17 @@ int main(int argc, char **argv)
 	KDL::Jacobian  		J_wrench_kdl;
 	KDL::Frame 			act_frame, frame_grav, shaft_frame;
 	KDL::Vector     		error;
+	KDL::Jacobian 		jacobian_dot(arm_cubes_n);
+	KDL::Chain 				chain;
+	KDL::JntSpaceInertiaMatrix	B;
+	KDL::JntArray				C;	
+	*/
+	Eigen::VectorXd      q;
 	Eigen::VectorXd		err_post(6);
 	Eigen::VectorXd		x_post(6);
 	Eigen::MatrixXd 	JA(6,arm_cubes_n);
 	Eigen::MatrixXd 	JA_pinv(arm_cubes_n,6);
 	Eigen::MatrixXd 	P(arm_cubes_n,6);
-	KDL::Jacobian 		jacobian_dot(arm_cubes_n);
 
 	
 	Eigen::VectorXd 	eq_dot(arm_cubes_n);
@@ -345,7 +358,7 @@ int main(int argc, char **argv)
 	Eigen::VectorXd 	qd_dot_eigen;
 	Eigen::VectorXd 	qd_ddot_eigen;
 	Eigen::VectorXd 	qd_eigen;
-	Eigen::MatrixXd 	jacobian_dot_eigen(jacobian_dot.rows(),jacobian_dot.columns());
+	//Eigen::MatrixXd 	jacobian_dot_eigen(jacobian_dot.rows(),jacobian_dot.columns());
 	Eigen::MatrixXd 	B_eigen(arm_cubes_n,arm_cubes_n);
 	Eigen::MatrixXd 	C_eigen(arm_cubes_n,arm_cubes_n);
 	Eigen::VectorXd 	G_eigen(arm_cubes_n);
@@ -366,9 +379,9 @@ int main(int argc, char **argv)
 	double 				cube_wrist_m(0.713);
 	double 				cube_m_addon(0.65);
 	double 				hand_m(0.5);
-	RigidBodyInertia 	inert_Q_0, inert_Q_1, inert_Q_2, inert_Q_3, inert_Q_4, inert_Q_5, inert_Q_6;
+	/*RigidBodyInertia 	inert_Q_0, inert_Q_1, inert_Q_2, inert_Q_3, inert_Q_4, inert_Q_5, inert_Q_6;
 	KDL::JntArray 		G;
-	KDL::JntArray 		g_wrench_comp;
+	KDL::JntArray 		g_wrench_comp;*/
 	double				a_mot, k_mot;
 
     ros::Duration 		max_cmd_time = ros::Duration(1);
@@ -379,13 +392,26 @@ int main(int argc, char **argv)
     int 				act_bp(1);
 	bool 				flag_pilot_out_ = true;
     double 				alpha(1);
-
+    unsigned int            numJoints;
     Eigen::MatrixXd Jac_wrench, Jac_trans_pinv_wrench;
     Eigen::VectorXd Grav_wrench;
     Eigen::VectorXd tau_meas;
     Eigen::VectorXd wrench(6); //Vettore di forze o coppie (solitamente a 6 gradi di libertà).
     geometry_msgs::Wrench wrench_msg; //Un messaggio ROS per rappresentare le forze o le coppie.
 
+	RigidBodyDynamics::Model model;
+	RigidBodyDynamics::Math::MatrixNd H;
+	RigidBodyDynamics::Math::MatrixNd C;
+	RigidBodyDynamics::Math::VectorNd Q;
+	RigidBodyDynamics::Math::VectorNd Q_dot;
+	RigidBodyDynamics::Math::VectorNd Q_ddot;
+	RigidBodyDynamics::Math::VectorNd G;
+	std::vector<Math::SpatialVector> f_ext;
+	RigidBodyDynamics::Math::VectorNd N; //N = c * q_dot;
+
+
+	std::string folder_path = "/home/marco/Alter_Ego/src/AlterEGO_v2/utils/ego_dance/urdf/left_arm.urdf";
+	const char *path = folder_path.c_str();
 
 	// --- Rviz ---
 	tf::TransformBroadcaster ik_br, ik_ref, ik_shaft; // è una classe in ROS che consente di trasmettere trasformazioni TF tra diversi frame di riferimento
@@ -475,8 +501,60 @@ int main(int argc, char **argv)
 
 	}
 	
+	//std::string folder_path = ros::package::getPath("ego_dance")+"/urdf/ego_robot_gazebo_v3.urdf";
+	//const char *path = folder_path.c_str();
 
-	// ------------------------------------------------------------------------------------- Kinematics
+    // Carica l'URDF
+    if (!RigidBodyDynamics::Addons::URDFReadFromFile(path, &model, true,false)) {
+        std::cerr << "Errore durante il caricamento dell'URDF." << std::endl;
+        return 1;
+    }
+
+  //   0: left_shoulder_flange_RZ (right)
+  //   1: left_arm_flange_RZ
+  //  2: left_elbow_flange_sensor_RZ
+  //  3: left_forearm_flange_RZ
+  //  4: left_wrist_flange_RZ
+  //  5: left_hand_RZ
+
+numJoints = model.dof_count;
+
+
+    std::cout << "Il valore di numJoints : " << numJoints << std::endl;
+
+	Q.resize(model.dof_count);
+	H.resize(numJoints,numJoints);
+	C.resize(numJoints,numJoints);
+	Q_dot.resize(numJoints);
+	Q_ddot.resize(numJoints);
+	G.resize(numJoints);
+	N.resize(numJoints);
+
+	Q.setZero();
+	Q_dot.setZero();
+	Q_ddot.setZero();
+
+
+ RigidBodyDynamics::CompositeRigidBodyAlgorithm(model,Q,H,true);
+ RigidBodyDynamics::InverseDynamics(model,Q,Q_dot,Q_ddot,G);
+ RigidBodyDynamics::NonlinearEffects(model,Q,Q_dot,N);
+
+ std::cout << "Il valore di B : " << H << std::endl;
+ std::cout << "Il valore di N : " << N << std::endl;
+
+
+
+
+
+	/*
+	Eigen::MatrixXd mass_matrix;
+	RigidBodyDynamics::CompositeRigidBodyAlgorithm(model, q, mass_matrix);
+	std::cout << "Il valore di mass_matrix è : " << mass_matrix << std::endl;*/
+
+
+
+
+	/* // ------------------------------------------------------------------------------------- Kinematics
 	if(AlterEgoVersion == 2){
 		inert_Q_0 = KDL::RigidBodyInertia(0, KDL::Vector(0.0, 0.0, 0.0)); 					
 		inert_Q_1 = KDL::RigidBodyInertia(cube_m, KDL::Vector(0.0, 0.0, 0.0)); 				
@@ -518,9 +596,32 @@ int main(int argc, char **argv)
 		chain.addSegment(Segment(Joint(Joint::None),Frame(Rotation(T_h2fwk[0],T_h2fwk[4],T_h2fwk[8],T_h2fwk[1],T_h2fwk[5],T_h2fwk[9],T_h2fwk[2],T_h2fwk[6],T_h2fwk[10]),
 		Vector(T_h2fwk[3],T_h2fwk[7],T_h2fwk[11]))));
 	}
-
-
 	
+	//Parsing URDF to KDL
+    // Crea un oggetto Tree per la rappresentazione KDL del modello
+    
+	
+	/*KDL::Tree kdl_tree;
+    
+    // Percorso al file URDF
+    std::string urdf_file = "/home/catkin_ws/src/AlterEGO_v2/alterego_robot/alterego_description/urdf/ego_robot_gazebo_v3.urdf";
+
+    // Effettua il parsing del file URDF e crea la rappresentazione KDL
+    if (!kdl_parser::treeFromFile(urdf_file, kdl_tree)) {
+        ROS_ERROR("Errore durante il parsing del file URDF");
+        return -1;
+    }
+
+	KDL::Chain chain;
+	if (!kdl_tree.getChain("base_link", "end_effector_link", chain)) {
+  	ROS_ERROR("Failed to get KDL chain");
+  		return -1;
+		}
+	
+	*/
+
+
+	/*
 	G.resize(chain.getNrOfJoints());
 	KDL::SetToZero(G);
 	g_wrench_comp.resize(chain.getNrOfJoints());
@@ -557,6 +658,20 @@ int main(int argc, char **argv)
 	J_wrench_kdl.resize(chain.getNrOfJoints());
 	Grav_wrench.resize(chain.getNrOfJoints());
 	double defl_max = 0.6;
+
+	KDL::Vector gravity(0.0, 0.0, -9.81);
+	KDL::ChainDynParam dyn_param(chain, gravity);
+	KDL::JntSpaceInertiaMatrix B_dyn;
+    dyn_param.JntToMass(q, B_dyn);
+
+	for (int i = 0; i < B_dyn.rows(); ++i) {
+    		for (int j = 0; j < B_dyn.columns(); ++j) {
+        		B_eigen(i, j) = B_dyn(i, j);
+    		}
+		}
+
+	std::cout << "Il valore di B_eigen è : " << B_eigen << std::endl;
+
 
 	shaft_to_pose_solver->JntToCart(meas_cube_shaft, shaft_frame);
 	jnt_to_pose_solver->JntToCart(q, ref_frame);
@@ -598,10 +713,10 @@ int main(int argc, char **argv)
 
         std::cout << "Il valore di B_eigen è : " << B_eigen << std::endl;
 	    std::cout << "Il valore di C_eigen è : " << C_eigen << std::endl;
+	
 
 
-
-	KDL::ChainDynParam dyn_param(chain,gravity_v);
+	//KDL::ChainDynParam dyn_param(chain,gravity_v);
 	q_eigen_f << Eigen::VectorXd::Zero(arm_cubes_n);
 
 	// stiffn = MAX_STIFF;
@@ -899,5 +1014,5 @@ int main(int argc, char **argv)
     	loop_rate.sleep();
 		
   		
-	}
+	}*/
 }
