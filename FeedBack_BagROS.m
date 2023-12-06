@@ -201,6 +201,70 @@ title('Joint 6');
 
 legend('q misurata','q desiderata', 'q comandata');
 
+t1 = 0:0.0048428972399813:248.46; % per tau elastica (più campioni)
+t2 = 0:0.0193700787401575:248.46; % per tau computed
+ 
+Tau_computed_left_2_interp = interp1(t2,Tau_computed_left_2,t1,'linear');
+Tau_computed_left_3_interp = interp1(t2,Tau_computed_left_3,t1,'linear');
+Tau_computed_left_4_interp = interp1(t2,Tau_computed_left_4,t1,'linear');
+Tau_computed_left_5_interp = interp1(t2,Tau_computed_left_5,t1,'linear');
+Tau_computed_left_6_interp = interp1(t2,Tau_computed_left_6,t1,'linear');
+ 
+figure(8);
+plot(t1,tau_elastica_left_2,'r');
+hold on; grid on;
+plot(t1,Tau_computed_left_2_interp,'b');
+ 
+xlabel('Time[s]');
+ylabel('Tau[N*m]');
+title('Joint 2');
+ 
+legend('tau_elastic','tau_desired');
+ 
+figure(9);
+plot(t1,tau_elastica_left_3,'r');
+hold on; grid on;
+plot(t1,Tau_computed_left_3_interp,'b');
+ 
+xlabel('Time[s]');
+ylabel('Tau[N*m]');
+title('Joint 3');
+ 
+legend('tau_elastic','tau_desired');
+ 
+figure(10);
+plot(t1,tau_elastica_left_4,'r');
+hold on; grid on;
+plot(t1,Tau_computed_left_4_interp,'b');
+ 
+xlabel('Time[s]');
+ylabel('Tau[N*m]');
+title('Joint 4');
+ 
+legend('tau_elastic','tau_desired');
+ 
+figure(11);
+plot(t1,tau_elastica_left_5,'r');
+hold on; grid on;
+plot(t1,Tau_computed_left_5_interp,'b');
+ 
+xlabel('Time[s]');
+ylabel('Tau[N*m]');
+title('Joint 5');
+ 
+legend('tau_elastic','tau_desired');
+ 
+figure(12);
+plot(t1,tau_elastica_left_6,'r');
+hold on; grid on;
+plot(t1,Tau_computed_left_6_interp,'b');
+ 
+xlabel('Time[s]');
+ylabel('Tau[N*m]');
+title('Joint 6');
+ 
+legend('tau_elastic','tau_desired');
+
 
 
 
