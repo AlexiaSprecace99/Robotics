@@ -4,7 +4,7 @@ clear
 clear all
 
 bagselect = rosbag('Feedback.bag');
-
+j = 1;
 %Selezione Topic Desiderati
 AlterEgo_State = select(bagselect,'Topic','/AlterEgoBase5/alterego_state');
 Kin_Topic = select(bagselect,'Topic','/AlterEgoBase5/left/kin_des_jnt_topic');
@@ -45,13 +45,14 @@ end
 
 %Q_des
 
-for i = 1:length(Q_des)
-Q_left_1(i) = Q_des{i}(1);
-Q_left_2(i) = Q_des{i}(2);
-Q_left_3(i) = Q_des{i}(3);
-Q_left_4(i) = Q_des{i}(4);
-Q_left_5(i) = Q_des{i}(5);
-Q_left_6(i) = Q_des{i}(6);
+for i = 2:length(Q_des)
+Q_left_1(j) = Q_des{i}(1);
+Q_left_2(j) = Q_des{i}(2);
+Q_left_3(j) = Q_des{i}(3);
+Q_left_4(j) = Q_des{i}(4);
+Q_left_5(j) = Q_des{i}(5);
+Q_left_6(j) = Q_des{i}(6);
+j = j + 1;
 end
 
 
@@ -121,7 +122,7 @@ Errore_left_5(i) = Errore{i}(5);
 Errore_left_6(i) = Errore{i}(6);
 end
 
-t = 0:0.01:248.46;
+t = 0:0.0193700787401575:248.46;
 figure(1);
 plot(t,Q_Meas_left_1,'r');
 hold on;
