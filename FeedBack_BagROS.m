@@ -3,8 +3,9 @@ clc
 clear
 clear all
 
-bagselect = rosbag('Feedback.bag');
+bagselect = rosbag('feedback_1x.bag');
 j = 1;
+t_end = 248.46;
 %Selezione Topic Desiderati
 AlterEgo_State = select(bagselect,'Topic','/AlterEgoBase5/alterego_state');
 Kin_Topic = select(bagselect,'Topic','/AlterEgoBase5/left/kin_des_jnt_topic');
@@ -122,13 +123,20 @@ Errore_left_5(i) = Errore{i}(5);
 Errore_left_6(i) = Errore{i}(6);
 end
 
-t = 0:0.0193700787401575:248.46;
+%t = 0:0.0193700787401575:248.46;
+t_des = t_end/length(Q_left_1);
+t = 0:t_des:t_end-t_des;
+t_mis = t_end/length(Q_Meas_left_1);
+t1 = 0:t_mis:t_end-t_mis;
+t_com = t_end/length(Ref_Cubes_left_1);
+t2 = 0:t_com:t_end-t_com;
+
 figure(1);
-plot(t,Q_Meas_left_1,'r');
+plot(t1,Q_Meas_left_1,'r');
 hold on;
 plot(t,Q_left_1,'b');
 hold on;
-plot(t,Ref_Cubes_left_1,'g');
+plot(t2,Ref_Cubes_left_1,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -137,11 +145,11 @@ title('Joint 1');
 legend('q misurata','q desiderata', 'q comandata');
 
 figure(2);
-plot(t,Q_Meas_left_2,'r');
+plot(t1,Q_Meas_left_2,'r');
 hold on;
 plot(t,Q_left_2,'b');
 hold on;
-plot(t,Ref_Cubes_left_2,'g');
+plot(t2,Ref_Cubes_left_2,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -150,11 +158,11 @@ title('Joint 2');
 legend('q misurata','q desiderata', 'q comandata');
 
 figure(3);
-plot(t,Q_Meas_left_3,'r');
+plot(t1,Q_Meas_left_3,'r');
 hold on;
 plot(t,Q_left_3,'b');
 hold on;
-plot(t,Ref_Cubes_left_3,'g');
+plot(t2,Ref_Cubes_left_3,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -163,11 +171,11 @@ title('Joint 3');
 legend('q misurata','q desiderata', 'q comandata');
 
 figure(4);
-plot(t,Q_Meas_left_4,'r');
+plot(t1,Q_Meas_left_4,'r');
 hold on;
 plot(t,Q_left_4,'b');
 hold on;
-plot(t,Ref_Cubes_left_4,'g');
+plot(t2,Ref_Cubes_left_4,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -176,11 +184,11 @@ title('Joint 4');
 legend('q misurata','q desiderata', 'q comandata');
 
 figure(5);
-plot(t,Q_Meas_left_5,'r');
+plot(t1,Q_Meas_left_5,'r');
 hold on;
 plot(t,Q_left_5,'b');
 hold on;
-plot(t,Ref_Cubes_left_5,'g');
+plot(t2,Ref_Cubes_left_5,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -189,11 +197,11 @@ title('Joint 5');
 legend('q misurata','q desiderata', 'q comandata');
 
 figure(6);
-plot(t,Q_Meas_left_6,'r');
+plot(t1,Q_Meas_left_6,'r');
 hold on;
 plot(t,Q_left_6,'b');
 hold on;
-plot(t,Ref_Cubes_left_6,'g');
+plot(t2,Ref_Cubes_left_6,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -201,19 +209,23 @@ title('Joint 6');
 
 legend('q misurata','q desiderata', 'q comandata');
 
-t1 = 0:0.0048428972399813:248.46; % per tau elastica (più campioni)
-t2 = 0:0.0193700787401575:248.46; % per tau computed
- 
-Tau_computed_left_2_interp = interp1(t2,Tau_computed_left_2,t1,'linear');
-Tau_computed_left_3_interp = interp1(t2,Tau_computed_left_3,t1,'linear');
-Tau_computed_left_4_interp = interp1(t2,Tau_computed_left_4,t1,'linear');
-Tau_computed_left_5_interp = interp1(t2,Tau_computed_left_5,t1,'linear');
-Tau_computed_left_6_interp = interp1(t2,Tau_computed_left_6,t1,'linear');
- 
+%t1 = 0:0.0048428972399813:248.46; % per tau elastica (più campioni)
+%t2 = 0:0.0193700787401575:248.46; % per tau computed
+t_el = t_end/length(tau_elastica_left_1);
+t_computed = t_end/length(Tau_computed_left_1);
+t3 = 0:t_el:t_end-t_el;
+t4 = 0:t_computed:t_end-t_computed;
+
+% Tau_computed_left_2_interp = interp1(t2,Tau_computed_left_2,t1,'linear');
+% Tau_computed_left_3_interp = interp1(t2,Tau_computed_left_3,t1,'linear');
+% Tau_computed_left_4_interp = interp1(t2,Tau_computed_left_4,t1,'linear');
+% Tau_computed_left_5_interp = interp1(t2,Tau_computed_left_5,t1,'linear');
+% Tau_computed_left_6_interp = interp1(t2,Tau_computed_left_6,t1,'linear');
+%  
 figure(8);
-plot(t1,tau_elastica_left_2,'r');
+plot(t3,tau_elastica_left_2,'r');
 hold on; grid on;
-plot(t1,Tau_computed_left_2_interp,'b');
+plot(t4,Tau_computed_left_2,'b');
  
 xlabel('Time[s]');
 ylabel('Tau[N*m]');
@@ -222,9 +234,9 @@ title('Joint 2');
 legend('tau_elastic','tau_desired');
  
 figure(9);
-plot(t1,tau_elastica_left_3,'r');
+plot(t3,tau_elastica_left_3,'r');
 hold on; grid on;
-plot(t1,Tau_computed_left_3_interp,'b');
+plot(t4,Tau_computed_left_3,'b');
  
 xlabel('Time[s]');
 ylabel('Tau[N*m]');
@@ -233,9 +245,9 @@ title('Joint 3');
 legend('tau_elastic','tau_desired');
  
 figure(10);
-plot(t1,tau_elastica_left_4,'r');
+plot(t3,tau_elastica_left_4,'r');
 hold on; grid on;
-plot(t1,Tau_computed_left_4_interp,'b');
+plot(t4,Tau_computed_left_4,'b');
  
 xlabel('Time[s]');
 ylabel('Tau[N*m]');
@@ -244,9 +256,9 @@ title('Joint 4');
 legend('tau_elastic','tau_desired');
  
 figure(11);
-plot(t1,tau_elastica_left_5,'r');
+plot(t3,tau_elastica_left_5,'r');
 hold on; grid on;
-plot(t1,Tau_computed_left_5_interp,'b');
+plot(t4,Tau_computed_left_5,'b');
  
 xlabel('Time[s]');
 ylabel('Tau[N*m]');
@@ -255,9 +267,9 @@ title('Joint 5');
 legend('tau_elastic','tau_desired');
  
 figure(12);
-plot(t1,tau_elastica_left_6,'r');
+plot(t3,tau_elastica_left_6,'r');
 hold on; grid on;
-plot(t1,Tau_computed_left_6_interp,'b');
+plot(t4,Tau_computed_left_6,'b');
  
 xlabel('Time[s]');
 ylabel('Tau[N*m]');
