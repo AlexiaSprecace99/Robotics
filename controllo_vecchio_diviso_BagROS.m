@@ -3,8 +3,9 @@ clc
 clear
 clear all
 
-bagselect = rosbag('controllo_vecchio_diviso.bag');
+bagselect = rosbag('controllo_diviso_0.2x.bag');
 j = 1;
+t_end = 248.46;
 
 %Selezione Topic Desiderati
 AlterEgo_State = select(bagselect,'Topic','/AlterEgoBase5/alterego_state');
@@ -66,23 +67,19 @@ Q_Meas_left_6(i) = Q_Meas{i}(6);
 end
 
 
-%t = 0:0.01:97.22;
-t = 0:0.0255538414069732:248.46;
-%t1 = 0:0.0025078677:97.22;
-t1 = 0:0.0064090592514252:248.46;
-Q_meas_left_1_interp = interp1(t1,Q_Meas_left_1,t,'linear');
-Q_meas_left_2_interp = interp1(t1,Q_Meas_left_2,t,'linear');
-Q_meas_left_3_interp = interp1(t1,Q_Meas_left_3,t,'linear');
-Q_meas_left_4_interp = interp1(t1,Q_Meas_left_4,t,'linear');
-Q_meas_left_5_interp = interp1(t1,Q_Meas_left_5,t,'linear');
-Q_meas_left_6_interp = interp1(t1,Q_Meas_left_6,t,'linear');
+t_des = t_end/length(Q_left_1);
+t = 0:t_des:t_end-t_des;
+t_mis = t_end/length(Q_Meas_left_1);
+t1 = 0:t_mis:t_end-t_mis;
+t_com = t_end/length(Ref_Cubes_left_1);
+t2 = 0:t_com:t_end-t_com;
 
-figure(1); grid on;
-plot(t,Q_meas_left_1_interp,'r');
-hold on; grid on;
+figure(1);
+plot(t1,Q_Meas_left_1,'r');
+hold on;
 plot(t,Q_left_1,'b');
-% hold on; grid on;
-% plot(t,Ref_Cubes_left_1,'g');
+hold on;
+plot(t2,Ref_Cubes_left_1,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -90,12 +87,12 @@ title('Joint 1');
 
 legend('q misurata','q desiderata', 'q comandata');
 
-figure(2); grid on;
-plot(t,Q_meas_left_2_interp,'r');
-hold on; grid on;
+figure(2);
+plot(t1,Q_Meas_left_2,'r');
+hold on;
 plot(t,Q_left_2,'b');
-hold on; grid on;
-plot(t,Ref_Cubes_left_2,'g');
+hold on;
+plot(t2,Ref_Cubes_left_2,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -103,12 +100,12 @@ title('Joint 2');
 
 legend('q misurata','q desiderata', 'q comandata');
 
-figure(3); grid on;
-plot(t,Q_meas_left_3_interp,'r');
-hold on; grid on;
+figure(3);
+plot(t1,Q_Meas_left_3,'r');
+hold on;
 plot(t,Q_left_3,'b');
-hold on; grid on;
-plot(t,Ref_Cubes_left_3,'g');
+hold on;
+plot(t2,Ref_Cubes_left_3,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -116,12 +113,12 @@ title('Joint 3');
 
 legend('q misurata','q desiderata', 'q comandata');
 
-figure(4); grid on;
-plot(t,Q_meas_left_4_interp,'r');
-hold on; grid on;
+figure(4);
+plot(t1,Q_Meas_left_4,'r');
+hold on;
 plot(t,Q_left_4,'b');
-hold on; grid on;
-plot(t,Ref_Cubes_left_4,'g');
+hold on;
+plot(t2,Ref_Cubes_left_4,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -129,12 +126,12 @@ title('Joint 4');
 
 legend('q misurata','q desiderata', 'q comandata');
 
-figure(5); grid on;
-plot(t,Q_meas_left_5_interp,'r');
-hold on; grid on;
+figure(5);
+plot(t1,Q_Meas_left_5,'r');
+hold on;
 plot(t,Q_left_5,'b');
-hold on; grid on;
-plot(t,Ref_Cubes_left_5,'g');
+hold on;
+plot(t2,Ref_Cubes_left_5,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
@@ -142,15 +139,23 @@ title('Joint 5');
 
 legend('q misurata','q desiderata', 'q comandata');
 
-figure(6); grid on;
-plot(t,Q_meas_left_6_interp,'r');
-hold on; grid on;
+figure(6);
+plot(t1,Q_Meas_left_6,'r');
+hold on;
 plot(t,Q_left_6,'b');
-hold on; grid on;
-plot(t,Ref_Cubes_left_6,'g');
+hold on;
+plot(t2,Ref_Cubes_left_6,'g');
 
 xlabel('Time[s]');
 ylabel('Joint position[rad]');
 title('Joint 6');
 
 legend('q misurata','q desiderata', 'q comandata');
+
+
+
+
+
+
+
+
