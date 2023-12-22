@@ -9,7 +9,12 @@ a1 = 1;
 a2 = 1;
 
 % Getting Vectors from Sim
-%e_out = out.e_out.Data.';
+ex = out.ex.Data;
+ey = out.ey.Data;
+for i = 1:1:size(ex,3)
+    err_x(i) = ex(1,1,i);
+    err_y(i) = ey(1,1,i);
+end
 q_out = out.x_state.Data(1:2,1,:);
 xi_des_out = out.xi_des.Data.';
 t_out = out.tout.';
@@ -19,12 +24,14 @@ res = 0.1;
 [t_sim, q_sim] = adjust_time(t_out,q_out,res);
 
 % errors
-% h(1) = subplot(1,2,1);
-% hold on
-% plot(t_out,e_out(1,:));
-% plot(t_out,e_out(2,:));
-% legend('$e_1$','$e_2$','Interpreter','latex')
-% title('Errors')
+h(1) = subplot(1,2,1);
+hold on; grid on;
+plot(t_out,err_x);
+plot(t_out,err_y);
+xlabel("Time[s]");
+ylabel("Errors[m]");
+legend('$e_x$','$e_y$','Interpreter','latex')
+title('Errors')
 
 % robot motion
 h(2) = subplot(1,2,2);
@@ -32,7 +39,7 @@ hold on
 axis equal
 axis ([-0.5 2.5 -1.0 2.0])
 grid on
-title('Animation - Feedback')
+title('Animation - Feedback Linearization')
 
 % initialize animation
 L(1) = plot(0,0,'-ko','linewidth',2);
